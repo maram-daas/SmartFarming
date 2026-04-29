@@ -25,14 +25,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class Main extends Application {
-    // Data storage - using fully qualified name for model Alert
+    // Data storage
     private static final List<CropZone> cropZones = new ArrayList<>();
     private static final List<LivestockZone> livestockZones = new ArrayList<>();
     private static final List<AquacultureZone> aquacultureZones = new ArrayList<>();
     private static final List<model.entities.Alert> activeAlerts = new ArrayList<>();
     private static final List<model.entities.Alert> alertHistory = new ArrayList<>();
     private static int alertCounter = 100;
-    private static int readingCounter = 1;
 
     private BorderPane mainLayout;
     private VBox sidebar;
@@ -86,16 +85,27 @@ public class Main extends Application {
                 createSidebarButton("🐟 Aquaculture", this::showAquacultureZones),
                 createSidebarButton("📡 Sensors", this::showSensors),
                 createSidebarButton("⚠️ Alerts Center", this::showAlerts),
-                createSidebarButton("📈 Reports", this::showReports)
+                createSidebarButton("📈 Reports", this::showReports),
+                createSidebarButton("➕ Create New Zone", this::showCreateZoneMenu)
         );
 
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
         box.getChildren().add(spacer);
 
-        Button exitBtn = createSidebarButton("🚪 Exit System", () -> System.exit(0));
-        exitBtn.setStyle("-fx-background-color: #c62828; -fx-text-fill: white; -fx-alignment: CENTER-LEFT; -fx-cursor: hand;");
-        box.getChildren().add(exitBtn);
+        // Quit Button
+        Button quitBtn = createSidebarButton("🚪 Quit Application", () -> {
+            javafx.scene.control.Alert confirm = new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.CONFIRMATION);
+            confirm.setTitle("Exit");
+            confirm.setHeaderText("Exit Smart Farming System");
+            confirm.setContentText("Are you sure you want to exit?");
+            Optional<ButtonType> result = confirm.showAndWait();
+            if (result.isPresent() && result.get() == ButtonType.OK) {
+                System.exit(0);
+            }
+        });
+        quitBtn.setStyle("-fx-background-color: #c62828; -fx-text-fill: white; -fx-alignment: CENTER-LEFT; -fx-cursor: hand;");
+        box.getChildren().add(quitBtn);
 
         return box;
     }
@@ -169,6 +179,194 @@ public class Main extends Application {
 
         card.getChildren().addAll(titleLbl, valueLbl);
         return card;
+    }
+
+    private void showCreateZoneMenu() {
+        VBox container = new VBox(20);
+        setPageTitle("Create New Zone", container);
+
+        Label instruction = new Label("Select the type of zone you want to create:");
+        instruction.setFont(Font.font("System", 14));
+        container.getChildren().add(instruction);
+
+        GridPane grid = new GridPane();
+        grid.setHgap(20);
+        grid.setVgap(20);
+        grid.setAlignment(Pos.CENTER);
+
+        Button cropZoneBtn = createZoneButton("🌾 Crop Zone", "#388e3c", this::showCreateCropZoneDialog);
+        Button livestockZoneBtn = createZoneButton("🐄 Livestock Zone", "#fbc02d", this::showCreateLivestockZoneDialog);
+        Button aquacultureZoneBtn = createZoneButton("🐟 Aquaculture Zone", "#009688", this::showCreateAquacultureZoneDialog);
+
+        grid.add(cropZoneBtn, 0, 0);
+        grid.add(livestockZoneBtn, 1, 0);
+        grid.add(aquacultureZoneBtn, 2, 0);
+
+        container.getChildren().add(grid);
+        contentArea.getChildren().setAll(container);
+    }
+
+    private Button createZoneButton(String text, String color, Runnable action) {
+        Button btn = new Button(text);
+        btn.setPrefSize(180, 80);
+        btn.setStyle("-fx-background-color: " + color + "; -fx-text-fill: white; -fx-font-size: 16px; -fx-font-weight: bold; -fx-cursor: hand; -fx-background-radius: 8;");
+        btn.setOnAction(e -> action.run());
+        return btn;
+    }
+
+    private void showCreateCropZoneDialog() {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Create Crop Zone");
+        dialog.setHeaderText("Enter crop zone details");
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20));
+
+        TextField codeField = new TextField();
+        codeField.setPromptText("e.g., CZ002");
+        TextField nameField = new TextField();
+        nameField.setPromptText("e.g., South Field");
+
+        grid.add(new Label("Zone Code:"), 0, 0);
+        grid.add(codeField, 1, 0);
+        grid.add(new Label("Zone Name:"), 0, 1);
+        grid.add(nameField, 1, 1);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        dialog.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK && !codeField.getText().isEmpty() && !nameField.getText().isEmpty()) {
+                CropZone newZone = new CropZone(codeField.getText(), nameField.getText());
+                cropZones.add(newZone);
+                showInfoDialog("Success", "Crop Zone '" + nameField.getText() + "' created successfully!");
+                showCropZones();
+            }
+        });
+    }
+
+    private void showCreateLivestockZoneDialog() {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Create Livestock Zone");
+        dialog.setHeaderText("Enter livestock zone details");
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20));
+
+        TextField codeField = new TextField();
+        codeField.setPromptText("e.g., LZ002");
+        TextField nameField = new TextField();
+        nameField.setPromptText("e.g., West Pasture");
+        TextField feedTypeField = new TextField();
+        feedTypeField.setPromptText("e.g., Hay & Grain");
+        TextField quantityField = new TextField();
+        quantityField.setPromptText("e.g., 5.5");
+        TextField mealsField = new TextField();
+        mealsField.setPromptText("e.g., 3");
+
+        grid.add(new Label("Zone Code:"), 0, 0);
+        grid.add(codeField, 1, 0);
+        grid.add(new Label("Zone Name:"), 0, 1);
+        grid.add(nameField, 1, 1);
+        grid.add(new Label("Feed Type:"), 0, 2);
+        grid.add(feedTypeField, 1, 2);
+        grid.add(new Label("Quantity/Meal (kg):"), 0, 3);
+        grid.add(quantityField, 1, 3);
+        grid.add(new Label("Meals per Day:"), 0, 4);
+        grid.add(mealsField, 1, 4);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        dialog.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK && !codeField.getText().isEmpty() && !nameField.getText().isEmpty()) {
+                try {
+                    LivestockZone newZone = new LivestockZone(codeField.getText(), nameField.getText());
+                    double quantity = Double.parseDouble(quantityField.getText());
+                    int meals = Integer.parseInt(mealsField.getText());
+                    newZone.setFeedingProgram(new FeedingProgram(feedTypeField.getText(), quantity, meals));
+                    livestockZones.add(newZone);
+                    showInfoDialog("Success", "Livestock Zone '" + nameField.getText() + "' created successfully!");
+                    showLivestockZones();
+                } catch (NumberFormatException e) {
+                    showErrorDialog("Error", "Invalid number format for quantity or meals");
+                }
+            }
+        });
+    }
+
+    private void showCreateAquacultureZoneDialog() {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Create Aquaculture Zone");
+        dialog.setHeaderText("Enter aquaculture zone details");
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20));
+
+        TextField codeField = new TextField();
+        codeField.setPromptText("e.g., AZ002");
+        TextField nameField = new TextField();
+        nameField.setPromptText("e.g., East Pond");
+        TextField speciesField = new TextField();
+        speciesField.setPromptText("e.g., Tilapia, Catfish");
+        TextField countField = new TextField();
+        countField.setPromptText("e.g., 500");
+        TextField feedTypeField = new TextField();
+        feedTypeField.setPromptText("e.g., Pellets");
+        TextField quantityField = new TextField();
+        quantityField.setPromptText("e.g., 3.5");
+        TextField mealsField = new TextField();
+        mealsField.setPromptText("e.g., 3");
+
+        grid.add(new Label("Zone Code:"), 0, 0);
+        grid.add(codeField, 1, 0);
+        grid.add(new Label("Zone Name:"), 0, 1);
+        grid.add(nameField, 1, 1);
+        grid.add(new Label("Species (comma separated):"), 0, 2);
+        grid.add(speciesField, 1, 2);
+        grid.add(new Label("Animal Count:"), 0, 3);
+        grid.add(countField, 1, 3);
+        grid.add(new Label("Feed Type:"), 0, 4);
+        grid.add(feedTypeField, 1, 4);
+        grid.add(new Label("Quantity/Meal (kg):"), 0, 5);
+        grid.add(quantityField, 1, 5);
+        grid.add(new Label("Meals per Day:"), 0, 6);
+        grid.add(mealsField, 1, 6);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        dialog.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK && !codeField.getText().isEmpty() && !nameField.getText().isEmpty()) {
+                try {
+                    AquacultureZone newZone = new AquacultureZone(codeField.getText(), nameField.getText());
+
+                    String[] species = speciesField.getText().split(",");
+                    for (String s : species) {
+                        newZone.addSpecies(s.trim());
+                    }
+
+                    int count = Integer.parseInt(countField.getText());
+                    newZone.setAnimalCount(count);
+
+                    double quantity = Double.parseDouble(quantityField.getText());
+                    int meals = Integer.parseInt(mealsField.getText());
+                    newZone.setFeedingProgram(new FeedingProgram(feedTypeField.getText(), quantity, meals));
+
+                    aquacultureZones.add(newZone);
+                    showInfoDialog("Success", "Aquaculture Zone '" + nameField.getText() + "' created successfully!");
+                    showAquacultureZones();
+                } catch (NumberFormatException e) {
+                    showErrorDialog("Error", "Invalid number format for count, quantity, or meals");
+                }
+            }
+        });
     }
 
     private void showManualAlertDialog() {
@@ -670,7 +868,6 @@ public class Main extends Application {
         contentArea.getChildren().setAll(container);
     }
 
-    // Helper methods for showing dialogs (using fully qualified name for JavaFX Alert)
     private void showInfoDialog(String title, String message) {
         javafx.scene.control.Alert alert = new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.INFORMATION);
         alert.setTitle(title);
