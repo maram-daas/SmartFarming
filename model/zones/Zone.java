@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public abstract class Zone {
-    protected String code, name;
+    public String code, name;
     protected ZoneStatus status;
     protected List<Sensor> sensors;
 
