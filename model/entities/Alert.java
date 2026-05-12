@@ -26,6 +26,8 @@ public class Alert {
     public String getId() { return id; }
     public String getSensorCode() { return sensorCode; }
     public double getReadingValue() { return readingValue; }
+    public double getThresholdMin() { return thresholdMin; }
+    public double getThresholdMax() { return thresholdMax; }
     public SeverityLevel getSeverity() { return severity; }
     public LocalDateTime getTimestamp() { return timestamp; }
     public boolean isAcknowledged() { return acknowledged; }

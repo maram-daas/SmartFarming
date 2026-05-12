@@ -23,6 +23,8 @@ public abstract class Sensor {
     public String getCode() { return code; }
     public String getZoneCode() { return zoneCode; }
     public SensorStatus getStatus() { return status; }
+    public double getThresholdMin() { return thresholdMin; }
+    public double getThresholdMax() { return thresholdMax; }
     public void setStatus(SensorStatus s) { this.status = s; }
     public void suspend() { this.status = SensorStatus.SUSPENDED; }
     public void activate() { this.status = SensorStatus.ACTIVE; }
