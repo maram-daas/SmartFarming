@@ -13,6 +13,8 @@ public class GPSSensor extends Sensor {
 
     public String getAnimalId() { return animalId; }
     public Position getLastPosition() { return lastPosition; }
-    public void setLastPosition(Position p) { this.lastPosition = p; }
-    @Override public String getUnit() { return "coordinates"; }
+    public void setLastPosition(Position position) { this.lastPosition = position; }
+
+    @Override
+    public String getUnit() { return "coordinates"; }
 }
