@@ -41,7 +41,7 @@ public class Main extends Application {
     private static ObservableList<model.entities.Alert> activeAlerts = FXCollections.observableArrayList();
     private static ObservableList<model.entities.Alert> alertHistory = FXCollections.observableArrayList();
     private static int alertCounter = 100;
-    private static int zoneCounter = 1;
+    private static int zoneCounter = 1; //fatima
     private static int sensorCounter = 1;
 
     private BorderPane mainLayout;
