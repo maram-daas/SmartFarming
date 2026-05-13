@@ -711,7 +711,7 @@ for (Sensor s : sensors) {
 
 ---
 
-## Common Exam Questions & Answers
+## Common Questions & Answers
 
 ### Q1: Why is Zone an abstract class?
 **A:** Zone cannot be instantiated directly because different zone types have different behavior and entity types. Abstract method `getEntityCount()` forces subclasses to define what they count. Common code (like suspend/activate with sensor cascade) is shared in the base class.
@@ -829,7 +829,7 @@ for (Sensor s : sensors) {
 
 ---
 
-## Key Takeaways for Exam
+## Key Takeaways
 
 1. **Abstract classes** - Zone, Animal, Sensor - all define common behavior
 2. **Cascade pattern** - Suspending zone suspends all sensors automatically
@@ -842,4 +842,4 @@ for (Sensor s : sensors) {
 9. **Sensor hierarchy** - Different sensors for different measurement types
 10. **Threshold logic** - Out-of-range readings trigger alerts with severity levels
 
-This documentation covers ALL aspects of the system architecture, OOP principles, and component interactions. Study the relationships between classes (inheritance, composition, dependency) and the runtime behavior (alert generation, cascade suspension, production recording) - these are the most common exam topics!
+This documentation covers ALL aspects of the system architecture, OOP principles, and component interactions. Study the relationships between classes (inheritance, composition, dependency) and the runtime behavior (alert generation, cascade suspension, production recording)
