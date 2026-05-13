@@ -51,7 +51,7 @@ public class Main extends Application {
 
     private final String PRIMARY_COLOR = "#2e7d32";
     private final String SECONDARY_COLOR = "#f5f5f5";
-    private final String SIDEBAR_COLOR = "#1a237e";
+    private final String SIDEBAR_COLOR = "#2e7d32";   //#1a237e
     private final String ACCENT_COLOR = "#ff6f00";
     private final String DANGER_COLOR = "#c62828";
 
