@@ -104,11 +104,24 @@ public class AlertDataManager {
     // -------------------------------------------------------------------------
 
     /** Tries full-seconds format first, falls back to no-seconds format. */
+    // In AlertDataManager.java, fix the parseDateTime method
     static LocalDateTime parseDateTime(String raw) {
         try {
+            // Try full seconds format first
             return LocalDateTime.parse(raw, DT_FMT);
         } catch (DateTimeParseException e) {
-            return LocalDateTime.parse(raw, DT_FMT_NO_SECS);
+            try {
+                // Try without seconds
+                return LocalDateTime.parse(raw, DT_FMT_NO_SECS);
+            } catch (DateTimeParseException e2) {
+                // Try ISO format
+                try {
+                    return LocalDateTime.parse(raw);
+                } catch (DateTimeParseException e3) {
+                    System.err.println("Failed to parse timestamp: " + raw);
+                    return LocalDateTime.now();
+                }
+            }
         }
     }
 }

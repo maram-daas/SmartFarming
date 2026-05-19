@@ -41,7 +41,7 @@ public class SensorReadingsProcessor {
      * @param allZones      all zones (crop + livestock + aquaculture cast to Zone)
      * @param activeAlerts  running list of active alerts (new alerts are appended)
      * @param alertHistory  full alert history (new alerts are appended)
-     * @return              list of newly generated alerts (subset added to both lists above)
+     * @return              list of newly generated alerts
      */
     public static List<Alert> process(List<Zone> allZones,
                                       List<Alert> activeAlerts,
@@ -49,6 +49,7 @@ public class SensorReadingsProcessor {
         List<Alert> newAlerts = new ArrayList<>();
         File file = new File(READINGS_FILE);
         if (!file.exists() || file.length() == 0) {
+            System.out.println("No readings file or file is empty");
             return newAlerts;
         }
 
@@ -63,8 +64,8 @@ public class SensorReadingsProcessor {
 
                 String[] parts = trimmed.split("\\|", -1);
                 if (parts.length < 3) {
-                    System.out.println("Skipping malformed reading line: " + trimmed);
-                    processedLines.add(trimmed); // discard bad lines; don't retry indefinitely
+                    System.out.println("Skipping malformed reading line (need at least 3 fields): " + trimmed);
+                    processedLines.add(trimmed);
                     continue;
                 }
 
@@ -78,7 +79,7 @@ public class SensorReadingsProcessor {
                 }
 
                 if (sensor.getStatus() != SensorStatus.ACTIVE) {
-                    System.out.println("Sensor inactive, skipping: " + sensorCode);
+                    System.out.println("Sensor not active (" + sensor.getStatus() + "), skipping: " + sensorCode);
                     retryLines.add(trimmed);
                     continue;
                 }
@@ -102,6 +103,7 @@ public class SensorReadingsProcessor {
 
                 if (handled) {
                     processedLines.add(trimmed);
+                    System.out.println("  Processed reading for: " + sensorCode);
                 } else {
                     retryLines.add(trimmed);
                 }
@@ -112,11 +114,20 @@ public class SensorReadingsProcessor {
         }
 
         // Archive processed lines, put retry lines back
-        archiveProcessed(processedLines);
+        if (!processedLines.isEmpty()) {
+            archiveProcessed(processedLines);
+            System.out.println("Archived " + processedLines.size() + " processed readings");
+        }
         rewrite(file, retryLines);
 
-        System.out.println("Readings processed: " + processedLines.size()
-                + ", kept for retry: " + retryLines.size());
+        if (!retryLines.isEmpty()) {
+            System.out.println("Kept " + retryLines.size() + " readings for retry");
+        }
+
+        if (!newAlerts.isEmpty()) {
+            System.out.println("Generated " + newAlerts.size() + " new alerts!");
+        }
+
         return newAlerts;
     }
 
@@ -144,13 +155,14 @@ public class SensorReadingsProcessor {
             if (zone != null) {
                 sensor.setAssignedZone(zone);
                 if (!sensor.isWithinZoneBounds()) {
-                    Alert alert = createAlert(sensor.getCode(), 0,
+                    String alertId = "ALT" + System.currentTimeMillis() + "_" + new Random().nextInt(10000);
+                    Alert alert = new Alert(alertId, sensor.getCode(), 0,
                             sensor.getThresholdMin(), sensor.getThresholdMax(),
                             SeverityLevel.CRITICAL, ts);
                     newAlerts.add(alert);
                     activeAlerts.add(alert);
                     alertHistory.add(alert);
-                    System.out.println("GPS Alert: animal left zone – " + sensor.getCode());
+                    System.out.println("  GPS Alert: animal left zone! Lat=" + latitude + ", Lon=" + longitude);
                 }
             }
             return true;
@@ -172,20 +184,26 @@ public class SensorReadingsProcessor {
             Reading reading = new Reading(sensor.getCode(), value, sensor.getUnit(), ts);
             sensor.addReading(reading);
 
-            if (value < sensor.getThresholdMin() || value > sensor.getThresholdMax()) {
-                SeverityLevel severity =
-                        (value < sensor.getThresholdMin() * 0.7 || value > sensor.getThresholdMax() * 1.3)
-                                ? SeverityLevel.CRITICAL
-                                : SeverityLevel.WARNING;
+            System.out.println("  Added reading to " + sensor.getCode() + ": " + value + " " + sensor.getUnit());
 
-                Alert alert = createAlert(sensor.getCode(), value,
+            // Check threshold violation
+            if (value < sensor.getThresholdMin() || value > sensor.getThresholdMax()) {
+                SeverityLevel severity = SeverityLevel.WARNING;
+                // Critical if more than 30% outside threshold
+                if (value < sensor.getThresholdMin() * 0.7 || value > sensor.getThresholdMax() * 1.3) {
+                    severity = SeverityLevel.CRITICAL;
+                }
+
+                String alertId = "ALT" + System.currentTimeMillis() + "_" + new Random().nextInt(10000);
+                Alert alert = new Alert(alertId, sensor.getCode(), value,
                         sensor.getThresholdMin(), sensor.getThresholdMax(),
                         severity, ts);
                 newAlerts.add(alert);
                 activeAlerts.add(alert);
                 alertHistory.add(alert);
-                System.out.println("Threshold Alert: " + sensor.getCode() + " = " + value
-                        + " [" + sensor.getThresholdMin() + ", " + sensor.getThresholdMax() + "]");
+                System.out.println("  ALERT: " + sensor.getCode() + " = " + value
+                        + " (threshold: [" + sensor.getThresholdMin() + " - " + sensor.getThresholdMax() + "])");
+                System.out.println("  Severity: " + severity);
             }
             return true;
         } catch (Exception e) {
@@ -201,11 +219,16 @@ public class SensorReadingsProcessor {
     private static void archiveProcessed(List<String> lines) {
         if (lines.isEmpty()) return;
         File dir = new File(ARCHIVE_DIR);
-        dir.mkdirs();
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
         String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-        File archive = new File(dir, "readings_" + stamp + ".txt");
+        File archive = new File(dir, "readings_processed_" + stamp + ".txt");
         try (PrintWriter w = new PrintWriter(new FileWriter(archive))) {
-            for (String l : lines) w.println(l);
+            for (String l : lines) {
+                w.println(l);
+            }
+            System.out.println("  Archived to: " + archive.getName());
         } catch (IOException e) {
             System.err.println("Error writing archive: " + e.getMessage());
         }
@@ -214,7 +237,14 @@ public class SensorReadingsProcessor {
     /** Rewrites the readings file with only the lines that still need retrying. */
     private static void rewrite(File file, List<String> retryLines) {
         try (PrintWriter w = new PrintWriter(new FileWriter(file))) {
-            for (String l : retryLines) w.println(l);
+            // Write header comments
+            w.println("# Sensor readings file - Format depends on sensor type");
+            w.println("# Regular sensors: sensorCode|value|timestamp");
+            w.println("# GPS sensors: sensorCode|latitude|longitude|timestamp");
+            w.println("");
+            for (String l : retryLines) {
+                w.println(l);
+            }
         } catch (IOException e) {
             System.err.println("Error rewriting sensor_readings.txt: " + e.getMessage());
         }
@@ -241,22 +271,19 @@ public class SensorReadingsProcessor {
     }
 
     // -------------------------------------------------------------------------
-    // DATE / ALERT HELPERS
+    // DATE HELPERS
     // -------------------------------------------------------------------------
 
     private static LocalDateTime parseDateTime(String raw) {
         try {
             return LocalDateTime.parse(raw, DT_FMT);
         } catch (DateTimeParseException e) {
-            return LocalDateTime.parse(raw, DT_FMT_NO_SECS);
+            try {
+                return LocalDateTime.parse(raw, DT_FMT_NO_SECS);
+            } catch (DateTimeParseException e2) {
+                System.err.println("Failed to parse timestamp: " + raw);
+                return LocalDateTime.now();
+            }
         }
-    }
-
-    private static Alert createAlert(String sensorCode, double value,
-                                     double min, double max,
-                                     SeverityLevel severity, LocalDateTime ts) {
-        String id = "ALT" + ts.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
-                + "_" + new Random().nextInt(10000);
-        return new Alert(id, sensorCode, value, min, max, severity, ts);
     }
 }

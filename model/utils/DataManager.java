@@ -1,10 +1,9 @@
 package model.utils;
 
-import model.animals.Poultry;
-import model.animals.Ruminant;
 import model.zones.*;
 import model.entities.*;
-
+import model.sensors.*;
+import model.animals.*;
 import java.io.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -19,10 +18,7 @@ import java.util.*;
  *   data/livestock_zones.txt     – LivestockDataManager
  *   data/aquaculture_zones.txt   – AquacultureDataManager
  *   data/alert_history.txt       – AlertDataManager
- *   data/sensor_readings.txt     – SensorReadingsProcessor  (incoming readings queue)
- *
- * Call DataManager.saveAllData() / DataManager.loadAllData() exactly as before;
- * the rest of your application code does not need to change.
+ *   data/sensor_readings.txt     – SensorReadingsProcessor (incoming readings queue)
  */
 public class DataManager {
 
@@ -64,17 +60,18 @@ public class DataManager {
     }
 
     // -------------------------------------------------------------------------
-    // PROCESS READINGS  – unchanged public API, now delegated
+    // PROCESS READINGS  – reads from sensor_readings.txt and generates alerts
     // -------------------------------------------------------------------------
 
     public static List<Alert> processReadingsFile(List<Zone> allZones,
                                                   List<Alert> activeAlerts,
                                                   List<Alert> alertHistory) {
+        System.out.println("Checking for new sensor readings...");
         return SensorReadingsProcessor.process(allZones, activeAlerts, alertHistory);
     }
 
     // -------------------------------------------------------------------------
-    // CSV EXPORT  – unchanged from original
+    // CSV EXPORT
     // -------------------------------------------------------------------------
 
     public static void exportReportToCSV(List<CropZone> cropZones,
