@@ -28,6 +28,10 @@ public class Alert {
         this.dismissed = false;
     }
 
+    public String getMessage() {
+        return "Sensor " + sensorCode + " reading " + readingValue + " is outside range [" + thresholdMin + " - " + thresholdMax + "]";
+    }
+
     // Getters
     public String getId() { return id; }
     public String getSensorCode() { return sensorCode; }
