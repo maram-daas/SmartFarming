@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="javaFX-jps">
+    <CLASSES>
+      <root url="jar://$APPLICATION_HOME_DIR$/plugins/javaFX/lib/javaFX-jps.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
