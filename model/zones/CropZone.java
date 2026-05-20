@@ -7,30 +7,26 @@ import java.util.List;
 
 public class CropZone extends Zone {
     private List<Crop> crops;
-    private CropFamily zoneType;
 
     public CropZone(String code, String name) {
         super(code, name);
         this.crops = new ArrayList<>();
-        this.zoneType = null;
     }
 
-    public CropZone(String code, String name, CropFamily zoneType) {
-        super(code, name);
+    public CropZone(String code, String name, double north, double south, double east, double west, CropFamily allowedFamily) {
+        super(code, name, north, south, east, west);
         this.crops = new ArrayList<>();
-        this.zoneType = zoneType;
+        this.setAllowedCropFamily(allowedFamily);
     }
 
-    public CropFamily getZoneType() { return zoneType; }
-    public void setZoneType(CropFamily zoneType) { this.zoneType = zoneType; }
-    
     public void addCrop(Crop crop) {
-        if (zoneType != null && !crop.getFamily().equals(zoneType)) {
-            throw new IllegalArgumentException("Crop family " + crop.getFamily() + " does not match zone type " + zoneType);
+        if (getAllowedCropFamily() == null || crop.getFamily() == getAllowedCropFamily()) {
+            crops.add(crop);
+        } else {
+            throw new IllegalArgumentException("This zone only allows " + getAllowedCropFamily() + " crops");
         }
-        crops.add(crop);
     }
-    
+
     public List<Crop> getCrops() { return crops; }
     @Override public int getEntityCount() { return crops.size(); }
 }
