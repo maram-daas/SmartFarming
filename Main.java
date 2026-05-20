@@ -2143,7 +2143,7 @@ public class Main extends Application {
         TextField eventField = new TextField();
         eventField.setPromptText("New health event");
         eventField.setPrefWidth(400);
-//fatima2
+
         Button addEventBtn = new Button("Add Event");
         addEventBtn.setStyle("-fx-background-color: " + PRIMARY_COLOR + "; -fx-text-fill: white; -fx-cursor: hand;");
         addEventBtn.setOnAction(e -> {
