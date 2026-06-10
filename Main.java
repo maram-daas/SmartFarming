@@ -425,6 +425,27 @@ public class Main extends Application {
         return null;
     }
 
+    /**
+     * Return true if a zone name is already used by another zone (case-insensitive).
+     * If exclude is non-null, that zone is ignored (useful when editing).
+     */
+    private boolean isZoneNameTaken(String name, model.zones.Zone exclude) {
+        if (name == null) return false;
+        String n = name.trim().toLowerCase();
+        if (n.isEmpty()) return false;
+
+        for (CropZone z : cropZones) {
+            if (z != exclude && z.getName() != null && z.getName().trim().toLowerCase().equals(n)) return true;
+        }
+        for (LivestockZone z : livestockZones) {
+            if (z != exclude && z.getName() != null && z.getName().trim().toLowerCase().equals(n)) return true;
+        }
+        for (AquacultureZone z : aquacultureZones) {
+            if (z != exclude && z.getName() != null && z.getName().trim().toLowerCase().equals(n)) return true;
+        }
+        return false;
+    }
+
     private void addSensorToZone(Sensor sensor) {
         for (CropZone z : cropZones) {
             if (z.getCode().equals(sensor.getZoneCode())) {
@@ -793,6 +814,7 @@ public class Main extends Application {
 
         CategoryAxis xAxis = new CategoryAxis();
         NumberAxis yAxis = new NumberAxis(0, axisMax, tick);
+        yAxis.setLabel("Amount (DA)");
         yAxis.setMinorTickVisible(false);
         LineChart<String, Number> chart = new LineChart<>(xAxis, yAxis);
         chart.setTitle(null);
@@ -801,7 +823,7 @@ public class Main extends Application {
         chart.setCreateSymbols(true);
         chart.setMinHeight(280);
         chart.setPrefHeight(300);
-        chart.setVerticalGridLinesVisible(false);
+        chart.setVerticalGridLinesVisible(true);
         chart.setStyle("-fx-background-color: transparent;");
 
         XYChart.Series<String, Number> sCost = new XYChart.Series<>();
@@ -827,45 +849,61 @@ public class Main extends Application {
         Map<String, Integer> alerts = DashboardAggregator.buildAlertsBySeverity(alertHistory);
         Map<String, String> severityColors = Map.of(
                 "Critical", DANGER_COLOR,
-                "Warning", WARNING_COLOR,
-                "Other", PRIMARY_COLOR,
-                "No alerts", "#b0bec5"
+                "Warning", WARNING_COLOR
         );
 
-        int total = alerts.values().stream().mapToInt(Integer::intValue).sum();
-        if (total <= 0) {
-            total = 1;
+        // Only show Critical and Warning categories
+        List<String> categories = List.of("Critical", "Warning");
+
+        int maxCount = Math.max(alerts.getOrDefault("Critical", 0), alerts.getOrDefault("Warning", 0));
+        maxCount = Math.max(1, maxCount);
+        double axisMax = Math.ceil(maxCount * 1.2);
+        double tick = Math.max(1, (int)Math.ceil(axisMax / 5.0));
+
+        CategoryAxis xAxis = new CategoryAxis();
+        xAxis.setCategories(FXCollections.observableArrayList(categories));
+        NumberAxis yAxis = new NumberAxis(0, axisMax, tick);
+        yAxis.setLabel("Count");
+        yAxis.setMinorTickVisible(false);
+
+        BarChart<String, Number> barChart = new BarChart<>(xAxis, yAxis);
+        barChart.setLegendVisible(false);
+        barChart.setAnimated(false);
+        barChart.setVerticalGridLinesVisible(true);
+        barChart.setCategoryGap(24);
+        barChart.setBarGap(0);
+        barChart.setMinHeight(220);
+        barChart.setPrefHeight(260);
+        barChart.setStyle("-fx-background-color: transparent;");
+
+        XYChart.Series<String, Number> series = new XYChart.Series<>();
+        for (String cat : categories) {
+            int value = alerts.getOrDefault(cat, 0);
+            series.getData().add(new XYChart.Data<>(cat, value));
         }
+        barChart.getData().add(series);
 
-        VBox rows = new VBox(16);
-        rows.setPadding(new Insets(12, 4, 8, 4));
-        rows.setMinHeight(220);
-
-        for (Map.Entry<String, Integer> entry : alerts.entrySet()) {
-            String color = severityColors.getOrDefault(entry.getKey(), CHART_DARK);
-            int count = entry.getValue();
-            double share = count / (double) total;
-
-            Label label = new Label(entry.getKey() + "  —  " + count + " alert(s)");
-            label.setFont(Font.font("System", FontWeight.SEMI_BOLD, 12));
-            label.setTextFill(Color.web("#495057"));
-
-            ProgressBar bar = new ProgressBar(share);
-            bar.setPrefHeight(12);
-            bar.setMaxWidth(Double.MAX_VALUE);
-            bar.setStyle("-fx-accent: " + color + "; -fx-control-inner-background: #e8ece9;");
-
-            rows.getChildren().addAll(label, bar);
-        }
+        // Style bars and add tooltips with counts.
+        Platform.runLater(() -> {
+            for (XYChart.Data<String, Number> data : series.getData()) {
+                String key = data.getXValue();
+                String color = severityColors.getOrDefault(key, CHART_DARK);
+                Node node = data.getNode();
+                if (node != null) {
+                    node.setStyle("-fx-bar-fill: " + color + ";");
+                    Tooltip t = new Tooltip(key + ": " + data.getYValue().intValue());
+                    Tooltip.install(node, t);
+                }
+            }
+        });
 
         List<String[]> legendItems = new ArrayList<>();
-        for (Map.Entry<String, Integer> entry : alerts.entrySet()) {
-            String color = severityColors.getOrDefault(entry.getKey(), CHART_DARK);
-            legendItems.add(new String[]{color, entry.getKey() + " — share of total alerts"});
+        for (Map.Entry<String, String> sc : severityColors.entrySet()) {
+            legendItems.add(new String[]{sc.getValue(), sc.getKey() + " — count"});
         }
 
         VBox box = new VBox(8);
-        box.getChildren().addAll(rows, createChartLegend(legendItems.toArray(new String[0][])));
+        box.getChildren().addAll(barChart, createChartLegend(legendItems.toArray(new String[0][])));
         return box;
     }
 
@@ -2311,18 +2349,30 @@ public class Main extends Application {
 
         VBox content = new VBox(20);
         content.setAlignment(Pos.CENTER);
-        content.getChildren().addAll(
-                new Label("Click the button below to generate and export a comprehensive report."),
-                new Label("The report will include 7 paginated sheets:"),
-                new Label("  1. Crop Zones - All crops with their details"),
-                new Label("  2. Livestock Zones - All animals and feeding programs"),
-                new Label("  3. Aquaculture Zones - Species and fish counts"),
-                new Label("  4. Sensors - All sensors with thresholds and last readings"),
-                new Label("  5. Alert History - All past alerts with status"),
-                new Label("  6. Active Alerts - Current alerts requiring attention"),
-                new Label("  7. Summary Statistics - Farm-wide metrics"),
-                exportBtn
-        );
+
+        // Use dark text for readability on light cards
+        String reportTextStyle = "-fx-text-fill: #495057; -fx-font-size: 13px;";
+        Label info1 = new Label("Click the button below to generate and export a comprehensive report.");
+        Label info2 = new Label("The report will include 7 paginated sheets:");
+        Label item1 = new Label("  1. Crop Zones - All crops with their details");
+        Label item2 = new Label("  2. Livestock Zones - All animals and feeding programs");
+        Label item3 = new Label("  3. Aquaculture Zones - Species and fish counts");
+        Label item4 = new Label("  4. Sensors - All sensors with thresholds and last readings");
+        Label item5 = new Label("  5. Alert History - All past alerts with status");
+        Label item6 = new Label("  6. Active Alerts - Current alerts requiring attention");
+        Label item7 = new Label("  7. Summary Statistics - Farm-wide metrics");
+
+        info1.setStyle(reportTextStyle);
+        info2.setStyle(reportTextStyle);
+        item1.setStyle(reportTextStyle);
+        item2.setStyle(reportTextStyle);
+        item3.setStyle(reportTextStyle);
+        item4.setStyle(reportTextStyle);
+        item5.setStyle(reportTextStyle);
+        item6.setStyle(reportTextStyle);
+        item7.setStyle(reportTextStyle);
+
+        content.getChildren().addAll(info1, info2, item1, item2, item3, item4, item5, item6, item7, exportBtn);
 
         container.getChildren().add(content);
         showInContentArea(container);
@@ -2366,7 +2416,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK && !nameField.getText().isEmpty() && familyBox.getValue() != null) {
-                CropZone zone = new CropZone(codeField.getText(), nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, null)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                CropZone zone = new CropZone(codeField.getText(), newName);
                 zone.setAllowedCropFamily(familyBox.getValue());  // REQUIRED
                 cropZones.add(zone);
                 zoneCounter++;
@@ -2409,7 +2465,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
-                zone.setName(nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, zone)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                zone.setName(newName);
                 if (statusBox.getValue() == ZoneStatus.SUSPENDED) {
                     zone.suspend();
                 } else {
@@ -2458,7 +2520,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK && !nameField.getText().isEmpty() && typeBox.getValue() != null) {
-                LivestockZone zone = new LivestockZone(codeField.getText(), nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, null)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                LivestockZone zone = new LivestockZone(codeField.getText(), newName);
                 zone.setAllowedAnimalType(typeBox.getValue());
                 livestockZones.add(zone);
                 zoneCounter++;
@@ -2500,7 +2568,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
-                zone.setName(nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, zone)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                zone.setName(newName);
                 if (statusBox.getValue() == ZoneStatus.SUSPENDED) {
                     zone.suspend();
                 } else {
@@ -2537,7 +2611,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK && !nameField.getText().isEmpty()) {
-                AquacultureZone zone = new AquacultureZone(codeField.getText(), nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, null)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                AquacultureZone zone = new AquacultureZone(codeField.getText(), newName);
                 aquacultureZones.add(zone);
                 zoneCounter++;
                 saveAllData();
@@ -2573,7 +2653,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
-                zone.setName(nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, zone)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                zone.setName(newName);
                 try {
                     zone.setAnimalCount(Integer.parseInt(countField.getText()));
                 } catch (NumberFormatException e) {}
