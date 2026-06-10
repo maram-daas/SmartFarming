@@ -84,6 +84,13 @@ public class SensorReadingsProcessor {
                     continue;
                 }
 
+                Zone ownerZone = findZoneForSensor(allZones, sensor);
+                if (ownerZone != null && ownerZone.getStatus() != ZoneStatus.ACTIVE) {
+                    System.out.println("Zone suspended, skipping reading for: " + sensorCode);
+                    retryLines.add(trimmed);
+                    continue;
+                }
+
                 boolean handled = false;
 
                 // GPS format: sensorCode|latitude|longitude|timestamp  (4 fields)
@@ -142,8 +149,8 @@ public class SensorReadingsProcessor {
                                      List<Alert> activeAlerts,
                                      List<Alert> alertHistory) {
         try {
-            double latitude  = Double.parseDouble(parts[1]);
-            double longitude = Double.parseDouble(parts[2]);
+            double latitude  = FileNumbers.parse(parts[1]);
+            double longitude = FileNumbers.parse(parts[2]);
             LocalDateTime ts = parseDateTime(parts[3]);
 
             Position pos = new Position(latitude, longitude);
@@ -154,7 +161,7 @@ public class SensorReadingsProcessor {
             Zone zone = findZoneForSensor(allZones, sensor);
             if (zone != null) {
                 sensor.setAssignedZone(zone);
-                if (!sensor.isWithinZoneBounds()) {
+                if (zone.getStatus() == ZoneStatus.ACTIVE && !sensor.isWithinZoneBounds()) {
                     String alertId = "ALT" + System.currentTimeMillis() + "_" + new Random().nextInt(10000);
                     Alert alert = new Alert(alertId, sensor.getCode(), 0,
                             sensor.getThresholdMin(), sensor.getThresholdMax(),
@@ -178,7 +185,7 @@ public class SensorReadingsProcessor {
                                        List<Alert> activeAlerts,
                                        List<Alert> alertHistory) {
         try {
-            double value     = Double.parseDouble(parts[1]);
+            double value     = FileNumbers.parse(parts[1]);
             LocalDateTime ts = parseDateTime(parts[2]);
 
             Reading reading = new Reading(sensor.getCode(), value, sensor.getUnit(), ts);

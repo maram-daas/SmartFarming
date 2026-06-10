@@ -8,6 +8,7 @@ import java.io.PrintWriter;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Shared helper for serialising/deserialising Sensor and Reading lines.
@@ -23,7 +24,7 @@ public class SensorSerializer {
         String type = sensor.getClass().getSimpleName();
 
         // Base columns present for every sensor type
-        w.printf("SENSOR|%s|%s|%s|%f|%f|%s",
+        w.printf(Locale.US, "SENSOR|%s|%s|%s|%f|%f|%s",
                 zoneCode, sensor.getCode(), type,
                 sensor.getThresholdMin(), sensor.getThresholdMax(),
                 sensor.getStatus());
@@ -47,7 +48,7 @@ public class SensorSerializer {
 
         // Historical readings stored in the same file, immediately after the sensor
         for (Reading reading : sensor.getReadings()) {
-            w.printf("READING|%s|%f|%s|%s%n",
+            w.printf(Locale.US, "READING|%s|%f|%s|%s%n",
                     sensor.getCode(),
                     reading.getValue(),
                     reading.getUnit(),
@@ -65,8 +66,8 @@ public class SensorSerializer {
             String zoneCode = p[1];
             String code     = p[2];
             String type     = p[3];
-            double min      = Double.parseDouble(p[4]);
-            double max      = Double.parseDouble(p[5]);
+            double min      = FileNumbers.parse(p[4]);
+            double max      = FileNumbers.parse(p[5]);
             SensorStatus status = SensorStatus.valueOf(p[6]);
 
             Sensor sensor;
@@ -117,7 +118,7 @@ public class SensorSerializer {
         }
         try {
             String sensorCode   = p[1];
-            double value        = Double.parseDouble(p[2]);
+            double value        = FileNumbers.parse(p[2]);
             String unit         = p[3];
             LocalDateTime ts    = LocalDateTime.parse(p[4], dtFmt);
 

@@ -7,8 +7,10 @@ import model.crops.*;
 
 import java.io.*;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Handles loading and saving of CropZone data to/from data/crop_zones.txt
@@ -27,20 +29,25 @@ public class CropDataManager {
         try (PrintWriter w = new PrintWriter(new FileWriter(CROP_FILE))) {
             w.println("#CROP_ZONES");
             for (CropZone zone : cropZones) {
-                w.printf("ZONE|%s|%s|%s|%f|%f|%f|%f|%s%n",
+                w.printf(Locale.US, "ZONE|%s|%s|%s|%f|%f|%f|%f|%s%n",
                         zone.getCode(), zone.getName(), zone.getStatus(),
                         zone.getBoundNorth(), zone.getBoundSouth(),
                         zone.getBoundEast(), zone.getBoundWest(),
                         zone.getAllowedCropFamily());
 
                 for (Crop crop : zone.getCrops()) {
-                    w.printf("CROP|%s|%s|%s|%s|%s|%s|%f|%f|%f|%f%n",
+                    w.printf(Locale.US, "CROP|%s|%s|%s|%s|%s|%s|%f|%f|%f|%f%n",
                             zone.getCode(), crop.getName(), crop.getFamily(),
                             crop.getPlantingDate().format(DATE_FMT),
                             crop.getExpectedHarvestDate().format(DATE_FMT),
                             crop.getGrowthStage(),
                             crop.getOptimalPHMin(), crop.getOptimalPHMax(),
                             crop.getOptimalMoistureMin(), crop.getOptimalMoistureMax());
+                    for (var entry : crop.getProductionRecord().getEntries()) {
+                        w.printf(Locale.US, "PRODUCTION|%s|%s|%f|%s%n",
+                                zone.getCode(), crop.getName(), entry.getAmount(),
+                                entry.getRecordedAt().format(DT_FMT));
+                    }
                 }
 
                 for (Sensor sensor : zone.getSensors()) {
@@ -78,10 +85,14 @@ public class CropDataManager {
                 switch (p[0]) {
                     case "ZONE":
                         currentZone = new CropZone(p[1], p[2]);
-                        if ("ACTIVE".equals(p[3])) currentZone.activate();
+                        if ("ACTIVE".equals(p[3])) {
+                            currentZone.activate();
+                        } else if ("SUSPENDED".equals(p[3])) {
+                            currentZone.suspend();
+                        }
                         currentZone.setBounds(
-                                Double.parseDouble(p[4]), Double.parseDouble(p[5]),
-                                Double.parseDouble(p[6]), Double.parseDouble(p[7]));
+                                FileNumbers.parse(p[4]), FileNumbers.parse(p[5]),
+                                FileNumbers.parse(p[6]), FileNumbers.parse(p[7]));
                         if (p.length > 8 && !p[8].isEmpty() && !"null".equals(p[8]))
                             currentZone.setAllowedCropFamily(CropFamily.valueOf(p[8]));
                         cropZones.add(currentZone);
@@ -95,14 +106,28 @@ public class CropDataManager {
                                 CropFamily.valueOf(p[3]),
                                 LocalDate.parse(p[4], DATE_FMT),
                                 LocalDate.parse(p[5], DATE_FMT),
-                                Double.parseDouble(p[7]),
-                                Double.parseDouble(p[8]),
-                                Double.parseDouble(p[9]),
-                                Double.parseDouble(p[10])
+                                FileNumbers.parse(p[7]),
+                                FileNumbers.parse(p[8]),
+                                FileNumbers.parse(p[9]),
+                                FileNumbers.parse(p[10])
                         );
                         crop.setGrowthStage(GrowthStage.valueOf(p[6]));
                         currentZone.addCrop(crop);
                         System.out.println("    Loaded crop: " + p[2]);
+                        break;
+
+                    case "PRODUCTION":
+                        if (currentZone == null) break;
+                        for (Crop c : currentZone.getCrops()) {
+                            if (c.getName().equals(p[2])) {
+                                double amount = FileNumbers.parse(p[3]);
+                                LocalDateTime recordedAt = p.length > 4 && !p[4].isEmpty()
+                                        ? LocalDateTime.parse(p[4], DT_FMT)
+                                        : LocalDateTime.now();
+                                c.recordProduction(amount, recordedAt);
+                                break;
+                            }
+                        }
                         break;
 
                     case "SENSOR":

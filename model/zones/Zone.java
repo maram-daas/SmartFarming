@@ -77,6 +77,11 @@ public abstract class Zone {
         for (Sensor s : sensors) s.activate();
     }
 
-    public void addSensor(Sensor sensor) { sensors.add(sensor); }
+    public void addSensor(Sensor sensor) {
+        sensors.add(sensor);
+        if (status == ZoneStatus.SUSPENDED) {
+            sensor.suspend();
+        }
+    }
     public abstract int getEntityCount();
 }

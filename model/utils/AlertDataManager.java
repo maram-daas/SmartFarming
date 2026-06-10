@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Handles loading and saving of Alert history to/from data/alert_history.txt
@@ -33,7 +34,7 @@ public class AlertDataManager {
             w.println("#ALERT_HISTORY");
             for (Alert alert : alertHistory) {
                 // Always format with DT_FMT so the file is consistent and re-parseable.
-                w.printf("ALERT|%s|%s|%f|%f|%f|%s|%s|%b|%b%n",
+                w.printf(Locale.US, "ALERT|%s|%s|%f|%f|%f|%s|%s|%b|%b%n",
                         alert.getId(),
                         alert.getSensorCode(),
                         alert.getReadingValue(),
@@ -79,9 +80,9 @@ public class AlertDataManager {
                     LocalDateTime ts = parseDateTime(p[7]);
                     Alert alert = new Alert(
                             p[1], p[2],
-                            Double.parseDouble(p[3]),
-                            Double.parseDouble(p[4]),
-                            Double.parseDouble(p[5]),
+                            FileNumbers.parse(p[3]),
+                            FileNumbers.parse(p[4]),
+                            FileNumbers.parse(p[5]),
                             SeverityLevel.valueOf(p[6]),
                             ts
                     );
