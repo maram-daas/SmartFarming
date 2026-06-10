@@ -7,6 +7,7 @@ import model.sensors.*;
 import java.io.*;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 
 /**
@@ -25,7 +26,7 @@ public class AquacultureDataManager {
         try (PrintWriter w = new PrintWriter(new FileWriter(AQUA_FILE))) {
             w.println("#AQUACULTURE_ZONES");
             for (AquacultureZone zone : aquacultureZones) {
-                w.printf("ZONE|%s|%s|%s|%f|%f|%f|%f%n",
+                w.printf(Locale.US, "ZONE|%s|%s|%s|%f|%f|%f|%f%n",
                         zone.getCode(), zone.getName(), zone.getStatus(),
                         zone.getBoundNorth(), zone.getBoundSouth(),
                         zone.getBoundEast(), zone.getBoundWest());
@@ -34,7 +35,7 @@ public class AquacultureDataManager {
                     w.printf("AQUA_SPECIES|%s|%s%n", zone.getCode(), species);
                 }
                 if (zone.getFeedingProgram() != null) {
-                    w.printf("FEED|%s|%s|%f|%d%n",
+                    w.printf(Locale.US, "FEED|%s|%s|%f|%d%n",
                             zone.getCode(), zone.getFeedingProgram().getFeedType(),
                             zone.getFeedingProgram().getQuantityPerMeal(),
                             zone.getFeedingProgram().getMealsPerDay());
@@ -74,10 +75,14 @@ public class AquacultureDataManager {
                 switch (p[0]) {
                     case "ZONE":
                         currentZone = new AquacultureZone(p[1], p[2]);
-                        if ("ACTIVE".equals(p[3])) currentZone.activate();
+                        if ("ACTIVE".equals(p[3])) {
+                            currentZone.activate();
+                        } else if ("SUSPENDED".equals(p[3])) {
+                            currentZone.suspend();
+                        }
                         currentZone.setBounds(
-                                Double.parseDouble(p[4]), Double.parseDouble(p[5]),
-                                Double.parseDouble(p[6]), Double.parseDouble(p[7]));
+                                FileNumbers.parse(p[4]), FileNumbers.parse(p[5]),
+                                FileNumbers.parse(p[6]), FileNumbers.parse(p[7]));
                         aquacultureZones.add(currentZone);
                         System.out.println("  Loaded aquaculture zone: " + p[1]);
                         break;
@@ -98,7 +103,7 @@ public class AquacultureDataManager {
                     case "FEED":
                         if (currentZone == null) break;
                         FeedingProgram fp = new FeedingProgram(
-                                p[2], Double.parseDouble(p[3]), Integer.parseInt(p[4]));
+                                p[2], FileNumbers.parse(p[3]), Integer.parseInt(p[4]));
                         currentZone.setFeedingProgram(fp);
                         System.out.println("    Loaded feeding program: " + p[2]);
                         break;

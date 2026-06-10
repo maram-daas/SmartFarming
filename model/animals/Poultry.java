@@ -1,16 +1,48 @@
 package model.animals;
 
 import model.enums.AnimalType;
+import model.entities.ProductionRecord;
+import model.interfaces.Producing;
 
-public class Poultry extends Animal {
-    private int eggCount;
+import java.time.LocalDateTime;
+
+public class Poultry extends Animal implements Producing {
+    private final ProductionRecord productionRecord = new ProductionRecord("eggs");
 
     public Poultry(String id, String species, int age, double weight) {
         super(id, species, age, weight);
-        this.eggCount = 0;
     }
 
-    public int getEggCount() { return eggCount; }
-    public void addEggs(int c) { this.eggCount += c; }
-    @Override public AnimalType getAnimalType() { return AnimalType.POULTRY; }
+    @Override
+    public double getProduction() {
+        return productionRecord.getTotalProduction();
+    }
+
+    @Override
+    public void recordProduction(double amount) {
+        productionRecord.addProduction(amount);
+    }
+
+    @Override
+    public void recordProduction(double amount, LocalDateTime recordedAt) {
+        productionRecord.addProduction(amount, recordedAt);
+    }
+
+    @Override
+    public ProductionRecord getProductionRecord() {
+        return productionRecord;
+    }
+
+    public int getEggCount() {
+        return (int) getProduction();
+    }
+
+    public void addEggs(int count) {
+        recordProduction(count);
+    }
+
+    @Override
+    public AnimalType getAnimalType() {
+        return AnimalType.POULTRY;
+    }
 }

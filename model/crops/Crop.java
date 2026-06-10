@@ -1,10 +1,14 @@
 package model.crops;
 
+import model.entities.ProductionRecord;
 import model.enums.CropFamily;
 import model.enums.GrowthStage;
-import java.time.LocalDate;
+import model.interfaces.Producing;
 
-public class Crop {
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
+public class Crop implements Producing {
     private String name;
     private CropFamily family;
     private LocalDate plantingDate;
@@ -14,6 +18,7 @@ public class Crop {
     private double optimalPHMax;
     private double optimalMoistureMin;
     private double optimalMoistureMax;
+    private final ProductionRecord productionRecord = new ProductionRecord("kg");
 
     public Crop(String name, CropFamily family, LocalDate plantingDate, LocalDate expectedHarvestDate,
                 double optimalPHMin, double optimalPHMax, double optimalMoistureMin, double optimalMoistureMax) {
@@ -49,4 +54,28 @@ public class Crop {
     public void setOptimalPHMax(double optimalPHMax) { this.optimalPHMax = optimalPHMax; }
     public void setOptimalMoistureMin(double optimalMoistureMin) { this.optimalMoistureMin = optimalMoistureMin; }
     public void setOptimalMoistureMax(double optimalMoistureMax) { this.optimalMoistureMax = optimalMoistureMax; }
+
+    @Override
+    public double getProduction() {
+        return productionRecord.getTotalProduction();
+    }
+
+    @Override
+    public void recordProduction(double amount) {
+        productionRecord.addProduction(amount);
+    }
+
+    @Override
+    public void recordProduction(double amount, LocalDateTime recordedAt) {
+        productionRecord.addProduction(amount, recordedAt);
+    }
+
+    @Override
+    public ProductionRecord getProductionRecord() {
+        return productionRecord;
+    }
+
+    public void recordHarvest(double kg) {
+        recordProduction(kg);
+    }
 }

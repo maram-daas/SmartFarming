@@ -1,14 +1,21 @@
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
+import javafx.geometry.Side;
 import javafx.scene.Scene;
+import javafx.scene.chart.BarChart;
+import javafx.scene.chart.CategoryAxis;
 import javafx.scene.chart.LineChart;
 import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.PieChart;
+import javafx.scene.chart.StackedAreaChart;
 import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
@@ -21,23 +28,29 @@ import javafx.stage.Screen;
 import javafx.geometry.Rectangle2D;
 
 import model.entities.Alert;
+import model.utils.DashboardAggregator;
 import model.utils.DataManager;
+import model.utils.ProductionPricing;
+import model.entities.ProductionEntry;
 import model.zones.*;
 import model.sensors.*;
 import model.crops.*;
 import model.animals.*;
 import model.entities.*;
 import model.enums.*;
+import model.interfaces.Producing;
 
 import java.io.File;
 import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
-import static java.awt.Color.white;
+
 
 public class Main extends Application {
     // Data storage
@@ -56,17 +69,29 @@ public class Main extends Application {
     private StackPane contentArea;
     private Label currentPageTitle;
 
-    // Color palette
-    private final String PRIMARY_COLOR = "#2e7d32";
-    private final String SECONDARY_COLOR = "#f5f5f5";
-    private final String SIDEBAR_COLOR = "#708238";
+    /** Maps sidebar page keys to nav buttons for active-state styling. */
+    private final Map<String, Button> navIdToButton = new LinkedHashMap<>();
+    private String activeNavId = "dashboard";
+
+    // Color palette (Soilless Farm Lab–style dashboard: forest green + lime accents)
+    private final String PRIMARY_COLOR = "#2d6a4f";
+    private final String SECONDARY_COLOR = "#f0f4f2";
+    private final String SIDEBAR_BG = "#1b4332";
+    private final String SIDEBAR_ACTIVE = "#52b788";
+    private final String SIDEBAR_HOVER = "#2d6a4f";
+    private final String CHART_DARK = "#1b4332";
+    private final String CHART_LIGHT = "#95d5b2";
+    private final String CHART_COST_COLOR = "#c62828";
+    private final String CHART_REVENUE_COLOR = "#40916c";
+    private final String CARD_SHADOW = "dropshadow(three-pass-box, rgba(27,67,50,0.14), 14, 0, 0, 2)";
     private final String DANGER_COLOR = "#c62828";
     private final String WARNING_COLOR = "#ff9800";
-    private final String SUCCESS_COLOR = "#4caf50";
+    private final String SUCCESS_COLOR = "#40916c";
 
     private Timer readingCheckerTimer;
     private boolean isAutoCheckEnabled = true;
     private int checkIntervalSeconds = 30;
+    private final ProductionPricing productionPricing = new ProductionPricing();
 
     // ==================== HELPER METHODS ====================
 
@@ -134,6 +159,7 @@ public class Main extends Application {
 
     private void loadDataFromFile() {
         DataManager.loadAllData(cropZones, livestockZones, aquacultureZones, alertHistory);
+        productionPricing.load();
         updateCountersFromData();
         syncAlerts();
     }
@@ -219,6 +245,7 @@ public class Main extends Application {
 
     private void saveAllData() {
         DataManager.saveAllData(cropZones, livestockZones, aquacultureZones, alertHistory);
+        productionPricing.save();
     }
 
     // PAGINATED EXCEL REPORT WITH MULTIPLE SHEETS
@@ -336,9 +363,9 @@ public class Main extends Application {
                 for (Alert alert : alertHistory) {
                     writer.printf("%s,%s,%.2f,%.2f,%.2f,%s,%s,%s,%s%n",
                             alert.getId(), alert.getSensorCode(), alert.getReadingValue(),
-                            alert.getThresholdMin(), alert.getThresholdMax(), alert.getSeverity(),
+                            alert.getThresholdMin(), alert.getThresholdMax(), alert.getSeverity() != null ? alert.getSeverity().toString() : "",
                             alert.getTimestamp().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
-                            alert.isAcknowledged(), alert.isDismissed());
+                            String.valueOf(alert.isAcknowledged()), String.valueOf(alert.isDismissed()));
                 }
 
                 // ==================== SHEET 6: ACTIVE ALERTS ====================
@@ -350,7 +377,7 @@ public class Main extends Application {
                 for (Alert alert : activeAlerts) {
                     writer.printf("%s,%s,%.2f,%.2f,%.2f,%s,%s%n",
                             alert.getId(), alert.getSensorCode(), alert.getReadingValue(),
-                            alert.getThresholdMin(), alert.getThresholdMax(), alert.getSeverity(),
+                            alert.getThresholdMin(), alert.getThresholdMax(), alert.getSeverity() != null ? alert.getSeverity().toString() : "",
                             alert.getTimestamp().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
                 }
 
@@ -396,6 +423,27 @@ public class Main extends Application {
             if (s.getCode().equals(code)) return s;
         }
         return null;
+    }
+
+    /**
+     * Return true if a zone name is already used by another zone (case-insensitive).
+     * If exclude is non-null, that zone is ignored (useful when editing).
+     */
+    private boolean isZoneNameTaken(String name, model.zones.Zone exclude) {
+        if (name == null) return false;
+        String n = name.trim().toLowerCase();
+        if (n.isEmpty()) return false;
+
+        for (CropZone z : cropZones) {
+            if (z != exclude && z.getName() != null && z.getName().trim().toLowerCase().equals(n)) return true;
+        }
+        for (LivestockZone z : livestockZones) {
+            if (z != exclude && z.getName() != null && z.getName().trim().toLowerCase().equals(n)) return true;
+        }
+        for (AquacultureZone z : aquacultureZones) {
+            if (z != exclude && z.getName() != null && z.getName().trim().toLowerCase().equals(n)) return true;
+        }
+        return false;
     }
 
     private void addSensorToZone(Sensor sensor) {
@@ -503,7 +551,7 @@ public class Main extends Application {
         mainLayout.setLeft(sidebar);
 
         contentArea = new StackPane();
-        contentArea.setPadding(new Insets(25));
+        contentArea.setPadding(new Insets(16, 24, 24, 24));
         contentArea.setStyle("-fx-background-color: " + SECONDARY_COLOR + ";");
         mainLayout.setCenter(contentArea);
 
@@ -515,152 +563,960 @@ public class Main extends Application {
 
         Scene scene = new Scene(mainLayout, screenWidth, screenHeight);
         primaryStage.setMaximized(true);
-        primaryStage.setTitle("Smart Farming System");
+        primaryStage.setTitle("Smart Farm Lab");
         primaryStage.setScene(scene);
         primaryStage.show();
     }
 
-    private VBox createSidebar() {
-        VBox box = new VBox(8);
-        box.setPadding(new Insets(25, 15, 25, 15));
-        box.setPrefWidth(260);
-        box.setStyle("-fx-background-color: " + SIDEBAR_COLOR + ";");
+    private void setActiveNavigation(String navId) {
+        this.activeNavId = navId;
+        for (Map.Entry<String, Button> e : navIdToButton.entrySet()) {
+            styleSidebarNavButton(e.getValue(), navId.equals(e.getKey()));
+        }
+    }
 
-        Label title = new Label("SMART FARM");
-        title.setFont(Font.font("System", FontWeight.BOLD, 22));
-        title.setTextFill(Color.WHITE);
-        title.setAlignment(Pos.CENTER);
-        title.setMaxWidth(Double.MAX_VALUE);
-        title.setPadding(new Insets(0, 0, 20, 0));
-        box.getChildren().add(title);
+    private void styleSidebarNavButton(Button btn, boolean active) {
+        if (active) {
+            btn.setStyle("-fx-background-color: " + SIDEBAR_ACTIVE + "; -fx-text-fill: white; -fx-font-size: 14px; -fx-font-weight: bold; -fx-cursor: hand; -fx-background-radius: 10; -fx-padding: 10 16;");
+        } else {
+            btn.setStyle("-fx-background-color: transparent; -fx-text-fill: rgba(255,255,255,0.92); -fx-font-size: 14px; -fx-cursor: hand; -fx-background-radius: 10; -fx-padding: 10 16;");
+        }
+    }
+
+    private void wireSidebarNavHover(Button btn, String navId) {
+        btn.setOnMouseEntered(e -> {
+            if (!navId.equals(activeNavId)) {
+                btn.setStyle("-fx-background-color: " + SIDEBAR_HOVER + "; -fx-text-fill: white; -fx-font-size: 14px; -fx-cursor: hand; -fx-background-radius: 10; -fx-padding: 10 16;");
+            }
+        });
+        btn.setOnMouseExited(e -> styleSidebarNavButton(btn, navId.equals(activeNavId)));
+    }
+
+    private Button createPageNavButton(String navId, String text, Runnable action) {
+        Button btn = new Button(text);
+        btn.setMaxWidth(Double.MAX_VALUE);
+        btn.setAlignment(Pos.CENTER_LEFT);
+        styleSidebarNavButton(btn, navId.equals(activeNavId));
+        wireSidebarNavHover(btn, navId);
+        btn.setOnAction(e -> {
+            setActiveNavigation(navId);
+            action.run();
+        });
+        navIdToButton.put(navId, btn);
+        return btn;
+    }
+
+    private Button createSidebarToolButton(String text, Runnable action) {
+        Button btn = new Button(text);
+        btn.setMaxWidth(Double.MAX_VALUE);
+        btn.setAlignment(Pos.CENTER_LEFT);
+        String inactive = "-fx-background-color: transparent; -fx-text-fill: rgba(255,255,255,0.78); -fx-font-size: 13px; -fx-cursor: hand; -fx-background-radius: 8; -fx-padding: 10 16;";
+        String hover = "-fx-background-color: " + SIDEBAR_HOVER + "; -fx-text-fill: white; -fx-font-size: 13px; -fx-cursor: hand; -fx-background-radius: 8; -fx-padding: 10 16;";
+        btn.setStyle(inactive);
+        btn.setOnMouseEntered(e -> btn.setStyle(hover));
+        btn.setOnMouseExited(e -> btn.setStyle(inactive));
+        btn.setOnAction(e -> action.run());
+        return btn;
+    }
+
+    private Button createLogoutButton() {
+        Button btn = new Button("Log out");
+        btn.setMaxWidth(Double.MAX_VALUE);
+        btn.setAlignment(Pos.CENTER_LEFT);
+        btn.setPadding(new Insets(12, 16, 12, 16));
+        String base = "-fx-background-color: transparent; -fx-text-fill: rgba(255,255,255,0.95); -fx-font-size: 14px; -fx-cursor: hand; -fx-border-color: rgba(255,255,255,0.4); -fx-border-radius: 10; -fx-background-radius: 10;";
+        btn.setStyle(base);
+        btn.setOnMouseEntered(e -> btn.setOpacity(0.88));
+        btn.setOnMouseExited(e -> btn.setOpacity(1.0));
+        btn.setOnAction(e -> {
+            saveAllData();
+            System.exit(0);
+        });
+        return btn;
+    }
+
+    private VBox createSidebar() {
+        navIdToButton.clear();
+        VBox box = new VBox(6);
+        box.setPadding(new Insets(28, 18, 24, 18));
+        box.setPrefWidth(272);
+        box.setStyle("-fx-background-color: " + SIDEBAR_BG + ";");
+
+        Label brand = new Label("🌱  Smart Farm Lab");
+        brand.setFont(Font.font("System", FontWeight.BOLD, 18));
+        brand.setTextFill(Color.WHITE);
+        brand.setWrapText(true);
+        brand.setMaxWidth(Double.MAX_VALUE);
+        brand.setPadding(new Insets(0, 0, 4, 0));
+
+        Label tag = new Label("Operations console");
+        tag.setFont(Font.font("System", 11));
+        tag.setTextFill(Color.color(1, 1, 1, 0.72));
+        tag.setPadding(new Insets(0, 0, 20, 0));
+
+        box.getChildren().addAll(brand, tag);
 
         box.getChildren().addAll(
-                createNavButton("Dashboard", this::showDashboard),
-                createNavButton("Crop Zones", () -> showZones("crop")),
-                createNavButton("Livestock Zones", () -> showZones("livestock")),
-                createNavButton("Aquaculture Zones", () -> showZones("aquaculture")),
-                createNavButton("Sensors", this::showSensors),
-                createNavButton("Alerts", this::showAlerts),
-                createNavButton("Reports", this::showReports),
-                new Separator(),
-                createNavButton("New Crop Zone", this::showCreateCropZoneDialog),
-                createNavButton("New Livestock Zone", this::showCreateLivestockZoneDialog),
-                createNavButton("New Aquaculture Zone", this::showCreateAquacultureZoneDialog),
-                createNavButton("New Sensor", this::showCreateSensorMenu),
-                createNavButton("Settings", this::showSettingsDialog)
-        );
+                createPageNavButton("dashboard", "Dashboard", this::showDashboard),
+                createPageNavButton("crop", "Crop zones", () -> showZones("crop")),
+                createPageNavButton("livestock", "Livestock zones", () -> showZones("livestock")),
+                createPageNavButton("aquaculture", "Aquaculture zones", () -> showZones("aquaculture")),
+                createPageNavButton("sensors", "Sensors", this::showSensors),
+                createPageNavButton("alerts", "Alerts", this::showAlerts),
+                createPageNavButton("production", "Production", this::showProductionRecords),
+                createPageNavButton("reports", "Reports", this::showReports));
+
+        Separator sep = new Separator();
+        sep.setPadding(new Insets(10, 0, 10, 0));
+        sep.setOpacity(0.35);
+
+        box.getChildren().add(sep);
+        box.getChildren().addAll(
+                createSidebarToolButton("+  New crop zone", this::showCreateCropZoneDialog),
+                createSidebarToolButton("+  New livestock zone", this::showCreateLivestockZoneDialog),
+                createSidebarToolButton("+  New aquaculture zone", this::showCreateAquacultureZoneDialog),
+                createSidebarToolButton("+  New sensor", this::showCreateSensorMenu),
+                createSidebarToolButton("⚙  Settings", this::showSettingsDialog));
 
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
         box.getChildren().add(spacer);
 
-        Label stats = new Label(String.format("Zones: %d | Sensors: %d | Alerts: %d",
+        Label stats = new Label(String.format("Zones %d  •  Sensors %d  •  Active alerts %d",
                 cropZones.size() + livestockZones.size() + aquacultureZones.size(),
                 getAllSensors().size(), activeAlerts.size()));
-        stats.setTextFill(Color.WHITE);
+        stats.setTextFill(Color.color(1, 1, 1, 0.78));
         stats.setFont(Font.font("System", 11));
-        stats.setPadding(new Insets(10, 0, 0, 0));
-        box.getChildren().add(stats);
-
-        Button quitBtn = createNavButton("Quit", () -> {
-            saveAllData();
-            System.exit(0);
-        });
-        quitBtn.setStyle("-fx-background-color: " + DANGER_COLOR + "; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 5; -fx-padding: 10 15;");
-        quitBtn.setOnMouseEntered(e -> quitBtn.setStyle("-fx-background-color: #b71c1c; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 5; -fx-padding: 10 15;"));
-        quitBtn.setOnMouseExited(e -> quitBtn.setStyle("-fx-background-color: " + DANGER_COLOR + "; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 5; -fx-padding: 10 15;"));
-        box.getChildren().add(quitBtn);
+        stats.setWrapText(true);
+        stats.setPadding(new Insets(0, 0, 14, 0));
+        box.getChildren().addAll(stats, createLogoutButton());
 
         return box;
-    }
-
-    private Button createNavButton(String text, Runnable action) {
-        Button btn = new Button(text);
-        btn.setMaxWidth(Double.MAX_VALUE);
-        btn.setAlignment(Pos.CENTER_LEFT);
-        btn.setPadding(new Insets(10, 15, 10, 15));
-        btn.setStyle("-fx-background-color: transparent; -fx-text-fill: #e0e0e0; -fx-font-size: 14px; -fx-cursor: hand; -fx-background-radius: 5;");
-        btn.setOnMouseEntered(e -> btn.setStyle("-fx-background-color: #283593; -fx-text-fill: white; -fx-font-size: 14px; -fx-cursor: hand; -fx-background-radius: 5;"));
-        btn.setOnMouseExited(e -> btn.setStyle("-fx-background-color: transparent; -fx-text-fill: #e0e0e0; -fx-font-size: 14px; -fx-cursor: hand; -fx-background-radius: 5;"));
-        btn.setOnAction(e -> action.run());
-        return btn;
     }
 
     private void setPageTitle(String title) {
         if (currentPageTitle == null) {
             currentPageTitle = new Label(title);
             currentPageTitle.setFont(Font.font("System", FontWeight.BOLD, 26));
-            currentPageTitle.setTextFill(Color.web(PRIMARY_COLOR));
+            currentPageTitle.setTextFill(Color.web(SIDEBAR_BG));
             currentPageTitle.setPadding(new Insets(0, 0, 20, 0));
         } else {
             currentPageTitle.setText(title);
+            currentPageTitle.setTextFill(Color.web(SIDEBAR_BG));
         }
     }
 
-    private void showDashboard() {
-        VBox container = new VBox(20);
-        setPageTitle("Farm Dashboard");
-        container.getChildren().add(currentPageTitle);
+    private void showInContentArea(Node content) {
+        ScrollPane sp = new ScrollPane(content);
+        sp.setFitToWidth(true);
+        sp.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
+        contentArea.getChildren().setAll(sp);
+    }
 
-        GridPane statsGrid = new GridPane();
-        statsGrid.setHgap(15);
-        statsGrid.setVgap(15);
-        statsGrid.setAlignment(Pos.CENTER);
+    private VBox wrapDashboardCard(String title, Node topRight, Node body) {
+        VBox card = new VBox(14);
+        card.setPadding(new Insets(20));
+        card.setStyle("-fx-background-color: #ffffff; -fx-background-radius: 12; -fx-effect: " + CARD_SHADOW + ";");
+
+        HBox head = new HBox(10);
+        head.setAlignment(Pos.CENTER_LEFT);
+        if (title != null) {
+            Label t = new Label(title);
+            t.setFont(Font.font("System", FontWeight.BOLD, 15));
+            t.setTextFill(Color.web(SIDEBAR_BG));
+            head.getChildren().add(t);
+        }
+        Region sp = new Region();
+        HBox.setHgrow(sp, Priority.ALWAYS);
+        head.getChildren().add(sp);
+        if (topRight != null) {
+            head.getChildren().add(topRight);
+        }
+        card.getChildren().add(head);
+
+        if (body != null) {
+            card.getChildren().add(body);
+            VBox.setVgrow(body, Priority.ALWAYS);
+        }
+        return card;
+    }
+
+    private VBox createDashboardMiniStat(String icon, String value, String caption) {
+        VBox card = new VBox(8);
+        card.setPadding(new Insets(16));
+        card.setPrefSize(158, 120);
+        card.setStyle("-fx-background-color: #ffffff; -fx-background-radius: 12; -fx-effect: " + CARD_SHADOW + ";");
+        card.setAlignment(Pos.TOP_LEFT);
+
+        Label ic = new Label(icon);
+        ic.setFont(Font.font(18));
+
+        Label val = new Label(value);
+        val.setFont(Font.font("System", FontWeight.BOLD, 26));
+        val.setTextFill(Color.web(PRIMARY_COLOR));
+
+        Label cap = new Label(caption);
+        cap.setFont(Font.font("System", 11));
+        cap.setTextFill(Color.web("#6c757d"));
+        cap.setWrapText(true);
+
+        card.getChildren().addAll(ic, val, cap);
+        return card;
+    }
+
+    private HBox createChartLegend(String[][] items) {
+        HBox legend = new HBox(18);
+        legend.setAlignment(Pos.CENTER);
+        legend.setPadding(new Insets(10, 0, 4, 0));
+        for (String[] item : items) {
+            Region swatch = new Region();
+            swatch.setPrefSize(14, 14);
+            swatch.setStyle("-fx-background-color: " + item[0] + "; -fx-background-radius: 7;");
+            Label label = new Label(item[1]);
+            label.setFont(Font.font("System", 11));
+            label.setTextFill(Color.web("#495057"));
+            HBox row = new HBox(6, swatch, label);
+            row.setAlignment(Pos.CENTER_LEFT);
+            legend.getChildren().add(row);
+        }
+        return legend;
+    }
+
+    private void styleLineChartSeries(LineChart<String, Number> chart, String costColor, String revenueColor) {
+        Platform.runLater(() -> {
+            for (int i = 0; i < chart.getData().size(); i++) {
+                XYChart.Series<String, Number> series = chart.getData().get(i);
+                String color = i == 0 ? costColor : revenueColor;
+                Node seriesNode = series.getNode();
+                if (seriesNode != null) {
+                    seriesNode.setStyle("-fx-stroke: " + color + ";");
+                }
+                for (XYChart.Data<String, Number> data : series.getData()) {
+                    Node symbol = data.getNode();
+                    if (symbol != null) {
+                        symbol.setStyle("-fx-background-color: " + color + ", white; -fx-background-radius: 6;");
+                    }
+                }
+            }
+        });
+    }
+
+    private VBox buildCostRevenueChart() {
+        List<DashboardAggregator.MonthlyFinancial> monthly = DashboardAggregator.buildMonthlyFinancials(
+                cropZones, livestockZones, aquacultureZones, productionPricing);
+
+        double maxValue = 1.0;
+        for (DashboardAggregator.MonthlyFinancial point : monthly) {
+            maxValue = Math.max(maxValue, Math.max(point.cost(), point.revenue()));
+        }
+        double axisMax = Math.ceil(maxValue * 1.2 * 10.0) / 10.0;
+        double tick = axisMax <= 1 ? 0.1 : axisMax <= 5 ? 0.5 : Math.ceil(axisMax / 5.0);
+
+        CategoryAxis xAxis = new CategoryAxis();
+        NumberAxis yAxis = new NumberAxis(0, axisMax, tick);
+        yAxis.setLabel("Amount (DA)");
+        yAxis.setMinorTickVisible(false);
+        LineChart<String, Number> chart = new LineChart<>(xAxis, yAxis);
+        chart.setTitle(null);
+        chart.setLegendVisible(false);
+        chart.setAnimated(false);
+        chart.setCreateSymbols(true);
+        chart.setMinHeight(280);
+        chart.setPrefHeight(300);
+        chart.setVerticalGridLinesVisible(true);
+        chart.setStyle("-fx-background-color: transparent;");
+
+        XYChart.Series<String, Number> sCost = new XYChart.Series<>();
+        sCost.setName("Cost");
+        XYChart.Series<String, Number> sRev = new XYChart.Series<>();
+        sRev.setName("Revenue");
+        for (DashboardAggregator.MonthlyFinancial point : monthly) {
+            sCost.getData().add(new XYChart.Data<>(point.label(), point.cost()));
+            sRev.getData().add(new XYChart.Data<>(point.label(), point.revenue()));
+        }
+        chart.getData().addAll(sCost, sRev);
+        styleLineChartSeries(chart, CHART_COST_COLOR, CHART_REVENUE_COLOR);
+
+        VBox box = new VBox(4);
+        box.getChildren().addAll(chart, createChartLegend(new String[][]{
+                {CHART_COST_COLOR, "Cost — monthly operating expenses (DA)"},
+                {CHART_REVENUE_COLOR, "Revenue — sales from production records (DA)"}
+        }));
+        return box;
+    }
+
+    private VBox buildAlertsSeverityChart() {
+        Map<String, Integer> alerts = DashboardAggregator.buildAlertsBySeverity(alertHistory);
+        Map<String, String> severityColors = Map.of(
+                "Critical", DANGER_COLOR,
+                "Warning", WARNING_COLOR
+        );
+
+        // Only show Critical and Warning categories
+        List<String> categories = List.of("Critical", "Warning");
+
+        int maxCount = Math.max(alerts.getOrDefault("Critical", 0), alerts.getOrDefault("Warning", 0));
+        maxCount = Math.max(1, maxCount);
+        double axisMax = Math.ceil(maxCount * 1.2);
+        double tick = Math.max(1, (int)Math.ceil(axisMax / 5.0));
+
+        CategoryAxis xAxis = new CategoryAxis();
+        xAxis.setCategories(FXCollections.observableArrayList(categories));
+        NumberAxis yAxis = new NumberAxis(0, axisMax, tick);
+        yAxis.setLabel("Count");
+        yAxis.setMinorTickVisible(false);
+
+        BarChart<String, Number> barChart = new BarChart<>(xAxis, yAxis);
+        barChart.setLegendVisible(false);
+        barChart.setAnimated(false);
+        barChart.setVerticalGridLinesVisible(true);
+        barChart.setCategoryGap(24);
+        barChart.setBarGap(0);
+        barChart.setMinHeight(220);
+        barChart.setPrefHeight(260);
+        barChart.setStyle("-fx-background-color: transparent;");
+
+        XYChart.Series<String, Number> series = new XYChart.Series<>();
+        for (String cat : categories) {
+            int value = alerts.getOrDefault(cat, 0);
+            series.getData().add(new XYChart.Data<>(cat, value));
+        }
+        barChart.getData().add(series);
+
+        // Style bars and add tooltips with counts.
+        Platform.runLater(() -> {
+            for (XYChart.Data<String, Number> data : series.getData()) {
+                String key = data.getXValue();
+                String color = severityColors.getOrDefault(key, CHART_DARK);
+                Node node = data.getNode();
+                if (node != null) {
+                    node.setStyle("-fx-bar-fill: " + color + ";");
+                    Tooltip t = new Tooltip(key + ": " + data.getYValue().intValue());
+                    Tooltip.install(node, t);
+                }
+            }
+        });
+
+        List<String[]> legendItems = new ArrayList<>();
+        for (Map.Entry<String, String> sc : severityColors.entrySet()) {
+            legendItems.add(new String[]{sc.getValue(), sc.getKey() + " — count"});
+        }
+
+        VBox box = new VBox(8);
+        box.getChildren().addAll(barChart, createChartLegend(legendItems.toArray(new String[0][])));
+        return box;
+    }
+
+    private VBox buildInventoryDonutChart(DashboardAggregator.InventoryPeriod period) {
+        Map<String, Double> mix = DashboardAggregator.buildInventoryMix(
+                cropZones, livestockZones, aquacultureZones, period);
+
+        String[] pieColors = {CHART_DARK, CHART_LIGHT, PRIMARY_COLOR, SUCCESS_COLOR, WARNING_COLOR};
+        ObservableList<PieChart.Data> pieData = FXCollections.observableArrayList();
+        List<String[]> legendItems = new ArrayList<>();
+        int colorIndex = 0;
+
+        for (Map.Entry<String, Double> entry : mix.entrySet()) {
+            String color = pieColors[colorIndex % pieColors.length];
+            pieData.add(new PieChart.Data(entry.getKey(), entry.getValue()));
+            legendItems.add(new String[]{color, entry.getKey() + " — " + String.format("%.1f", entry.getValue())});
+            colorIndex++;
+        }
+
+        PieChart pie = new PieChart(pieData);
+        pie.setLabelsVisible(false);
+        pie.setLegendVisible(false);
+        pie.setAnimated(false);
+        pie.setMinHeight(200);
+        pie.setStyle("-fx-background-color: transparent;");
+
+        for (int i = 0; i < pie.getData().size(); i++) {
+            final int idx = i;
+            final String color = pieColors[idx % pieColors.length];
+            PieChart.Data slice = pie.getData().get(i);
+            Platform.runLater(() -> {
+                if (slice.getNode() != null) {
+                    slice.getNode().setStyle("-fx-pie-color: " + color + ";");
+                }
+            });
+        }
+
+        VBox box = new VBox(4);
+        box.getChildren().addAll(pie, createChartLegend(legendItems.toArray(new String[0][])));
+        return box;
+    }
+
+    private DashboardAggregator.InventoryPeriod parseInventoryPeriod(String label) {
+        if ("This year".equals(label)) {
+            return DashboardAggregator.InventoryPeriod.THIS_YEAR;
+        }
+        if ("This month".equals(label)) {
+            return DashboardAggregator.InventoryPeriod.THIS_MONTH;
+        }
+        return DashboardAggregator.InventoryPeriod.THIS_WEEK;
+    }
+
+    private void addZoneShareRow(VBox v, String name, int pct) {
+        Label l = new Label(name + "  —  " + pct + "%");
+        l.setFont(Font.font("System", 12));
+        l.setTextFill(Color.web("#495057"));
+        ProgressBar p = new ProgressBar(Math.min(1, Math.max(0, pct / 100.0)));
+        p.setPrefHeight(10);
+        p.setMaxWidth(Double.MAX_VALUE);
+        p.setStyle("-fx-accent: " + CHART_DARK + "; -fx-control-inner-background: #e8ece9;");
+        v.getChildren().addAll(l, p);
+    }
+
+    private VBox buildZoneSharePanel() {
+        VBox v = new VBox(12);
+        Label mapStub = new Label("Regional footprint (illustrative map)\nDark green: accessed   ·   Light green: planned");
+        mapStub.setWrapText(true);
+        mapStub.setStyle("-fx-text-fill: #495057; -fx-font-size: 12px; -fx-padding: 14; -fx-background-color: #edf3ef; -fx-background-radius: 10;");
+        mapStub.setMaxWidth(Double.MAX_VALUE);
+        v.getChildren().add(mapStub);
+
+        int tz = cropZones.size() + livestockZones.size() + aquacultureZones.size();
+        if (tz < 1) {
+            tz = 1;
+        }
+        int cropPct = (int) Math.round(100.0 * cropZones.size() / tz);
+        int livPct = (int) Math.round(100.0 * livestockZones.size() / tz);
+        int aqPct = (int) Math.round(100.0 * aquacultureZones.size() / tz);
+        addZoneShareRow(v, "Crop zones", cropPct);
+        addZoneShareRow(v, "Livestock zones", livPct);
+        addZoneShareRow(v, "Aquaculture zones", aqPct);
+        return v;
+    }
+
+    private void showDashboard() {
+        showDashboard(false);
+    }
+
+    private void showDashboard(boolean reloadFromFiles) {
+        if (reloadFromFiles) {
+            loadDataFromFile();
+        }
+        setActiveNavigation("dashboard");
+
+        VBox root = new VBox(22);
+        root.setPadding(new Insets(4, 0, 32, 0));
+
+        Label welcome = new Label("Dashboard");
+        welcome.setFont(Font.font("System", FontWeight.BOLD, 26));
+        welcome.setTextFill(Color.web(SIDEBAR_BG));
 
         int totalZones = cropZones.size() + livestockZones.size() + aquacultureZones.size();
         int totalCrops = cropZones.stream().mapToInt(CropZone::getEntityCount).sum();
         int totalAnimals = livestockZones.stream().mapToInt(LivestockZone::getEntityCount).sum() +
                 aquacultureZones.stream().mapToInt(AquacultureZone::getAnimalCount).sum();
+        int sensorCount = getAllSensors().size();
 
-        statsGrid.add(createStatCard("Total Zones", String.valueOf(totalZones), "#1976d2"), 0, 0);
-        statsGrid.add(createStatCard("Active Alerts", String.valueOf(activeAlerts.size()), DANGER_COLOR), 1, 0);
-        statsGrid.add(createStatCard("Total Crops", String.valueOf(totalCrops), "#388e3c"), 2, 0);
-        statsGrid.add(createStatCard("Total Animals", String.valueOf(totalAnimals), "#fbc02d"), 3, 0);
-        statsGrid.add(createStatCard("Total Sensors", String.valueOf(getAllSensors().size()), "#ff9800"), 0, 1);
-        statsGrid.add(createStatCard("Critical Alerts", String.valueOf(activeAlerts.stream().filter(a -> a.getSeverity() == SeverityLevel.CRITICAL).count()), DANGER_COLOR), 1, 1);
+        HBox row1 = new HBox(20);
+        row1.setAlignment(Pos.TOP_LEFT);
 
-        container.getChildren().add(statsGrid);
+        VBox chartCard = wrapDashboardCard("Cost and revenue (DA)", null, buildCostRevenueChart());
+        HBox.setHgrow(chartCard, Priority.ALWAYS);
+        chartCard.setMinWidth(400);
 
-        Label alertsLabel = new Label("Recent Alerts");
-        alertsLabel.setFont(Font.font("System", FontWeight.BOLD, 16));
-        container.getChildren().add(alertsLabel);
+        GridPane kpis = new GridPane();
+        kpis.setHgap(14);
+        kpis.setVgap(14);
+        kpis.add(createDashboardMiniStat("🏞", String.valueOf(totalZones), "Total zones"), 0, 0);
+        kpis.add(createDashboardMiniStat("🌾", String.valueOf(totalCrops), "Total crops"), 1, 0);
+        kpis.add(createDashboardMiniStat("🐟", String.valueOf(totalAnimals), "Animals & fish"), 0, 1);
+        kpis.add(createDashboardMiniStat("📡", String.valueOf(sensorCount), "Sensors"), 1, 1);
 
-        VBox alertContainer = createAlertTableView(activeAlerts, true);
-        alertContainer.setPrefHeight(250);
-        container.getChildren().add(alertContainer);
+        row1.getChildren().addAll(chartCard, kpis);
+
+        HBox row2 = new HBox(20);
+        row2.setAlignment(Pos.TOP_LEFT);
+
+        VBox barCard = wrapDashboardCard("Alerts by severity", null, buildAlertsSeverityChart());
+        HBox.setHgrow(barCard, Priority.ALWAYS);
+
+        ComboBox<String> weekPick = new ComboBox<>(FXCollections.observableArrayList("This week", "This month", "This year"));
+        weekPick.setValue("This month");
+        weekPick.setStyle("-fx-background-radius: 8;");
+
+        VBox donutBody = new VBox();
+        VBox donutChart = buildInventoryDonutChart(parseInventoryPeriod(weekPick.getValue()));
+        donutBody.getChildren().add(donutChart);
+        weekPick.valueProperty().addListener((obs, oldVal, newVal) -> {
+            donutBody.getChildren().set(0, buildInventoryDonutChart(parseInventoryPeriod(newVal)));
+        });
+
+        VBox donutCard = wrapDashboardCard("Inventory mix", weekPick, donutBody);
+        donutCard.setPrefWidth(300);
+
+        VBox marketCard = wrapDashboardCard("Market share", null, buildZoneSharePanel());
+        marketCard.setPrefWidth(300);
+
+        row2.getChildren().addAll(barCard, donutCard, marketCard);
+
+        HBox tableHeader = new HBox(12);
+        tableHeader.setAlignment(Pos.CENTER_LEFT);
+        Label tx = new Label("Transaction history");
+        tx.setFont(Font.font("System", FontWeight.BOLD, 16));
+        tx.setTextFill(Color.web(SIDEBAR_BG));
+        Region rGrow = new Region();
+        HBox.setHgrow(rGrow, Priority.ALWAYS);
+        TextField tableSearch = new TextField();
+        tableSearch.setPromptText("Search…");
+        tableSearch.setPrefWidth(220);
+        tableSearch.setStyle("-fx-background-radius: 16; -fx-border-radius: 16; -fx-border-color: #dce5df; -fx-background-color: #f7faf8;");
+        Button filt = new Button("▼");
+        filt.setStyle("-fx-background-color: #eef2f0; -fx-background-radius: 8; -fx-cursor: hand;");
+        filt.setOnAction(e -> showInfoDialog("Filters", "Filter controls are not wired to sample data."));
+        tableHeader.getChildren().addAll(tx, rGrow, tableSearch, filt);
+
+        VBox alertsBox = createAlertTableView(activeAlerts, true);
+
+        VBox tableCard = new VBox(16);
+        tableCard.setPadding(new Insets(20));
+        tableCard.setStyle("-fx-background-color: #ffffff; -fx-background-radius: 12; -fx-effect: " + CARD_SHADOW + ";");
+        tableCard.getChildren().addAll(tableHeader, alertsBox);
 
         HBox actions = new HBox(10);
-        actions.setPadding(new Insets(10, 0, 0, 0));
+        actions.setPadding(new Insets(4, 0, 0, 0));
         actions.getChildren().addAll(
-                createActionButton("Generate Alert", "#ff9800", this::showManualAlertDialog),
-                createActionButton("Export Report", SUCCESS_COLOR, this::exportReport),
-                createActionButton("Refresh", "#607d8b", this::showDashboard)
+                createActionButton("Unit prices", PRIMARY_COLOR, this::showProductionPricingDialog),
+                createActionButton("Generate alert", WARNING_COLOR, this::showManualAlertDialog),
+                createActionButton("Export report", SUCCESS_COLOR, this::exportReport),
+                createActionButton("Refresh", "#607d8b", () -> showDashboard(true))
         );
-        container.getChildren().add(actions);
 
-        ScrollPane scrollPane = new ScrollPane(container);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setStyle("-fx-background-color: transparent;");
-        contentArea.getChildren().setAll(scrollPane);
+        root.getChildren().addAll(welcome, row1, row2, createProductionRecordsCard(), tableCard, actions);
+        showInContentArea(root);
     }
 
-    private VBox createStatCard(String title, String value, String color) {
-        VBox card = new VBox(5);
-        card.setPadding(new Insets(15));
-        card.setPrefSize(160, 90);
-        card.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.1), 10, 0, 0, 0);");
-        card.setAlignment(Pos.CENTER);
+    private class ProductionSummaryRow {
+        private final String zoneCode;
+        private final String zoneName;
+        private final String entityName;
+        private final String entityType;
+        private final String unit;
+        private final int entries;
+        private final double total;
+        private final double average;
+        private final double revenue;
+        private final Producing producer;
 
-        Label titleLbl = new Label(title);
-        titleLbl.setTextFill(Color.GRAY);
-        titleLbl.setFont(Font.font("System", 11));
+        ProductionSummaryRow(String zoneCode, String zoneName, String entityName, String entityType,
+                             Producing producer) {
+            this.zoneCode = zoneCode;
+            this.zoneName = zoneName;
+            this.entityName = entityName;
+            this.entityType = entityType;
+            this.producer = producer;
+            this.unit = producer.getProductionRecord().getUnit();
+            this.entries = producer.getProductionRecord().getEntries().size();
+            this.total = producer.getProduction();
+            this.average = producer.getProductionRecord().getAverageProduction();
+            this.revenue = productionPricing.calculateRevenue(producer.getProductionRecord());
+        }
 
-        Label valueLbl = new Label(value);
-        valueLbl.setFont(Font.font("System", FontWeight.BOLD, 28));
-        valueLbl.setTextFill(Color.web(color));
+        public String getZoneCode() { return zoneCode; }
+        public String getZoneName() { return zoneName; }
+        public String getEntityName() { return entityName; }
+        public String getEntityType() { return entityType; }
+        public String getUnit() { return unit; }
+        public int getEntries() { return entries; }
+        public double getTotal() { return total; }
+        public double getAverage() { return average; }
+        public double getRevenue() { return revenue; }
+        public Producing getProducer() { return producer; }
+    }
 
-        card.getChildren().addAll(titleLbl, valueLbl);
+    private List<ProductionSummaryRow> collectProductionSummaries() {
+        List<ProductionSummaryRow> rows = new ArrayList<>();
+        for (CropZone zone : cropZones) {
+            for (Crop crop : zone.getCrops()) {
+                rows.add(new ProductionSummaryRow(
+                        zone.getCode(), zone.getName(), crop.getName(), "Crop", crop));
+            }
+        }
+        for (LivestockZone zone : livestockZones) {
+            for (Animal animal : zone.getAnimals()) {
+                if (animal instanceof Producing producing) {
+                    rows.add(new ProductionSummaryRow(
+                            zone.getCode(), zone.getName(), animal.getId(),
+                            animal.getAnimalType().toString(), producing));
+                }
+            }
+        }
+        return rows;
+    }
+
+    private VBox createProductionRecordsTable(boolean showActions, Runnable refreshCallback) {
+        VBox container = new VBox(10);
+        ObservableList<ProductionSummaryRow> items =
+                FXCollections.observableArrayList(collectProductionSummaries());
+
+        TableView<ProductionSummaryRow> table = new TableView<>(items);
+        table.setPrefHeight(320);
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        table.setRowFactory(tv -> new TableRow<ProductionSummaryRow>() {
+            @Override
+            protected void updateItem(ProductionSummaryRow item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty) {
+                    setStyle("");
+                } else if (getIndex() % 2 == 0) {
+                    setStyle("-fx-background-color: #f8faf9;");
+                } else {
+                    setStyle("-fx-background-color: #eef4ef;");
+                }
+            }
+        });
+
+        TableColumn<ProductionSummaryRow, String> zoneCol = new TableColumn<>("Zone");
+        zoneCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getZoneCode()));
+
+        TableColumn<ProductionSummaryRow, String> nameCol = new TableColumn<>("Entity");
+        nameCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getEntityName()));
+
+        TableColumn<ProductionSummaryRow, String> typeCol = new TableColumn<>("Type");
+        typeCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getEntityType()));
+
+        TableColumn<ProductionSummaryRow, String> unitCol = new TableColumn<>("Unit");
+        unitCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getUnit()));
+
+        TableColumn<ProductionSummaryRow, Integer> entriesCol = new TableColumn<>("Entries");
+        entriesCol.setCellValueFactory(d -> new SimpleIntegerProperty(d.getValue().getEntries()).asObject());
+
+        TableColumn<ProductionSummaryRow, String> totalCol = new TableColumn<>("Total");
+        totalCol.setCellValueFactory(d -> new SimpleStringProperty(
+                String.format("%.2f %s", d.getValue().getTotal(), d.getValue().getUnit())));
+
+        TableColumn<ProductionSummaryRow, String> avgCol = new TableColumn<>("Average");
+        avgCol.setCellValueFactory(d -> new SimpleStringProperty(
+                d.getValue().getEntries() == 0 ? "—" :
+                        String.format("%.2f %s", d.getValue().getAverage(), d.getValue().getUnit())));
+
+        TableColumn<ProductionSummaryRow, String> revenueCol = new TableColumn<>("Revenue (DA)");
+        revenueCol.setCellValueFactory(d -> new SimpleStringProperty(
+                String.format("%.2f", d.getValue().getRevenue())));
+
+        table.getColumns().addAll(zoneCol, nameCol, typeCol, unitCol, entriesCol, totalCol, avgCol, revenueCol);
+
+        if (showActions) {
+            TableColumn<ProductionSummaryRow, Void> actionsCol = new TableColumn<>("Actions");
+            actionsCol.setPrefWidth(120);
+            actionsCol.setCellFactory(col -> new TableCell<ProductionSummaryRow, Void>() {
+                private final Button viewBtn = new Button("View / Add");
+
+                {
+                    viewBtn.setStyle("-fx-background-color: " + PRIMARY_COLOR + "; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 4;");
+                    viewBtn.setOnAction(e -> {
+                        ProductionSummaryRow row = getTableView().getItems().get(getIndex());
+                        showProductionRecordDialog(
+                                row.getProducer(),
+                                row.getEntityName() + " (" + row.getZoneCode() + ")",
+                                () -> {
+                                    items.setAll(collectProductionSummaries());
+                                    if (refreshCallback != null) {
+                                        refreshCallback.run();
+                                    }
+                                });
+                    });
+                }
+
+                @Override
+                protected void updateItem(Void item, boolean empty) {
+                    super.updateItem(item, empty);
+                    setGraphic(empty ? null : viewBtn);
+                }
+            });
+            table.getColumns().add(actionsCol);
+        }
+
+        if (items.isEmpty()) {
+            Label empty = new Label("No production records yet. Add crops or animals, then record harvest, milk, or egg production.");
+            empty.setWrapText(true);
+            empty.setTextFill(Color.web("#6c757d"));
+            empty.setPadding(new Insets(20, 0, 0, 0));
+            container.getChildren().addAll(empty, table);
+        } else {
+            container.getChildren().add(table);
+        }
+        return container;
+    }
+
+    private VBox createProductionRecordsCard() {
+        VBox card = new VBox(16);
+        card.setPadding(new Insets(20));
+        card.setStyle("-fx-background-color: #ffffff; -fx-background-radius: 12; -fx-effect: " + CARD_SHADOW + ";");
+
+        Label title = new Label("Production records");
+        title.setFont(Font.font("System", FontWeight.BOLD, 16));
+        title.setTextFill(Color.web(SIDEBAR_BG));
+
+        card.getChildren().addAll(title, createProductionRecordsTable(true, this::showDashboard));
         return card;
+    }
+
+    private void showProductionRecords() {
+        setActiveNavigation("production");
+        VBox container = new VBox(15);
+        setPageTitle("Production records");
+        container.getChildren().add(currentPageTitle);
+        HBox actions = new HBox(10);
+        actions.getChildren().add(createActionButton("Unit prices", PRIMARY_COLOR, this::showProductionPricingDialog));
+        container.getChildren().add(actions);
+        container.getChildren().add(createProductionRecordsTable(true, this::showProductionRecords));
+        showInContentArea(container);
+    }
+
+    private void showProductionRecordDialog(Producing producer, String title, Runnable onUpdate) {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Production — " + title);
+        dialog.setResizable(true);
+        dialog.getDialogPane().setPrefSize(520, 460);
+
+        ProductionRecord record = producer.getProductionRecord();
+        VBox content = new VBox(12);
+        content.setPadding(new Insets(20));
+
+        Label stats = new Label(String.format(
+                "Unit: %s   |   Entries: %d   |   Total: %.2f   |   Average: %.2f   |   Revenue: %.2f DA",
+                record.getUnit(),
+                record.getEntries().size(),
+                record.getTotalProduction(),
+                record.getAverageProduction(),
+                productionPricing.calculateRevenue(record)));
+        stats.setFont(Font.font("System", FontWeight.BOLD, 13));
+        stats.setTextFill(Color.web(SIDEBAR_BG));
+
+        ListView<String> history = new ListView<>();
+        history.setPrefHeight(220);
+        refreshProductionHistoryList(history, record);
+
+        Label todayPriceLabel = new Label();
+        todayPriceLabel.setFont(Font.font(11));
+        todayPriceLabel.setTextFill(Color.web("#6c757d"));
+        Runnable refreshTodayPrice = () -> {
+            LocalDate today = LocalDate.now();
+            double price = productionPricing.getPriceForDate(record.getUnit(), today);
+            todayPriceLabel.setText(price > 0
+                    ? String.format("Price for today (%s): %.2f DA / %s", today, price, record.getUnit())
+                    : String.format("No price set for today (%s) — set it below before recording.", today));
+        };
+        refreshTodayPrice.run();
+
+        HBox priceRow = new HBox(10);
+        TextField todayPriceField = new TextField();
+        todayPriceField.setPromptText("Price for today (DA/" + record.getUnit() + ")");
+        todayPriceField.setPrefWidth(200);
+        Button setPriceBtn = createActionButton("Set today's price", SUCCESS_COLOR, () -> {
+            try {
+                double price = Double.parseDouble(todayPriceField.getText().trim().replace(',', '.'));
+                if (price < 0) {
+                    showWarningDialog("Invalid price", "Price must be zero or positive.");
+                    return;
+                }
+                productionPricing.setDailyPrice(record.getUnit(), LocalDate.now(), price);
+                saveAllData();
+                refreshTodayPrice.run();
+                todayPriceField.clear();
+                stats.setText(String.format(
+                        "Unit: %s   |   Entries: %d   |   Total: %.2f   |   Average: %.2f   |   Revenue: %.2f DA",
+                        record.getUnit(),
+                        record.getEntries().size(),
+                        record.getTotalProduction(),
+                        record.getAverageProduction(),
+                        productionPricing.calculateRevenue(record)));
+                refreshProductionHistoryList(history, record);
+            } catch (NumberFormatException ex) {
+                showErrorDialog("Invalid price", "Please enter a valid price.");
+            }
+        });
+        priceRow.getChildren().addAll(todayPriceField, setPriceBtn);
+
+        HBox addRow = new HBox(10);
+        TextField amountField = new TextField();
+        amountField.setPromptText("Amount (" + record.getUnit() + ")");
+        amountField.setPrefWidth(200);
+        Button addBtn = createActionButton("Record", PRIMARY_COLOR, () -> {
+            try {
+                double amount = Double.parseDouble(amountField.getText().trim().replace(',', '.'));
+                if (amount <= 0) {
+                    showWarningDialog("Invalid amount", "Enter a value greater than zero.");
+                    return;
+                }
+                LocalDate today = LocalDate.now();
+                if (productionPricing.getPriceForDate(record.getUnit(), today) <= 0) {
+                    showWarningDialog("No price for today",
+                            "Set today's unit price before recording so revenue can be calculated.");
+                    return;
+                }
+                producer.recordProduction(amount, LocalDateTime.now());
+                saveAllData();
+                stats.setText(String.format(
+                        "Unit: %s   |   Entries: %d   |   Total: %.2f   |   Average: %.2f   |   Revenue: %.2f DA",
+                        record.getUnit(),
+                        record.getEntries().size(),
+                        record.getTotalProduction(),
+                        record.getAverageProduction(),
+                        productionPricing.calculateRevenue(record)));
+                refreshProductionHistoryList(history, record);
+                amountField.clear();
+                if (onUpdate != null) {
+                    onUpdate.run();
+                }
+            } catch (NumberFormatException ex) {
+                showErrorDialog("Invalid number", "Please enter a valid amount.");
+            }
+        });
+        addRow.getChildren().addAll(amountField, addBtn);
+
+        content.getChildren().addAll(stats, todayPriceLabel, priceRow, new Label("History:"), history, addRow);
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        dialog.showAndWait();
+    }
+
+    private void refreshProductionHistoryList(ListView<String> history, ProductionRecord record) {
+        history.getItems().clear();
+        List<ProductionEntry> entries = record.getEntries();
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        for (int i = 0; i < entries.size(); i++) {
+            ProductionEntry entry = entries.get(i);
+            double entryRevenue = productionPricing.calculateRevenue(
+                    entry.getAmount(), record.getUnit(), entry.getRecordedAt().toLocalDate());
+            history.getItems().add(String.format("#%d — %.2f %s on %s (%.2f DA)",
+                    i + 1, entry.getAmount(), record.getUnit(),
+                    entry.getRecordedAt().format(fmt), entryRevenue));
+        }
+        if (entries.isEmpty()) {
+            history.getItems().add("No entries recorded yet.");
+        }
+    }
+
+    private void showProductionPricingDialog() {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Daily unit prices");
+        dialog.setResizable(true);
+        dialog.getDialogPane().setPrefSize(620, 480);
+        dialog.setHeaderText("Set the selling price per unit for each day (DA). Revenue uses the price of the production date.");
+
+        VBox content = new VBox(14);
+        content.setPadding(new Insets(20));
+
+        ObservableList<ProductionPricing.DailyPriceEntry> priceRows =
+                FXCollections.observableArrayList(productionPricing.getAllDailyPrices());
+
+        TableView<ProductionPricing.DailyPriceEntry> table = new TableView<>(priceRows);
+        table.setPrefHeight(220);
+
+        TableColumn<ProductionPricing.DailyPriceEntry, String> unitCol = new TableColumn<>("Unit");
+        unitCol.setCellValueFactory(d -> new SimpleStringProperty(formatUnitLabel(d.getValue().unit())));
+
+        TableColumn<ProductionPricing.DailyPriceEntry, String> dateCol = new TableColumn<>("Date");
+        dateCol.setCellValueFactory(d -> new SimpleStringProperty(
+                d.getValue().date().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))));
+
+        TableColumn<ProductionPricing.DailyPriceEntry, String> priceCol = new TableColumn<>("Price (DA)");
+        priceCol.setCellValueFactory(d -> new SimpleStringProperty(String.format("%.2f", d.getValue().price())));
+
+        table.getColumns().addAll(unitCol, dateCol, priceCol);
+
+        ComboBox<String> unitBox = new ComboBox<>(FXCollections.observableArrayList("L", "eggs", "kg"));
+        unitBox.setValue("L");
+        DatePicker datePicker = new DatePicker(LocalDate.now());
+        TextField priceField = new TextField();
+        priceField.setPromptText("Price in DA");
+
+        Button addBtn = createActionButton("Add / Update", PRIMARY_COLOR, () -> {
+            try {
+                double price = Double.parseDouble(priceField.getText().trim().replace(',', '.'));
+                if (price < 0) {
+                    showWarningDialog("Invalid price", "Price must be zero or positive.");
+                    return;
+                }
+                String unit = unitBox.getValue();
+                LocalDate date = datePicker.getValue();
+                productionPricing.setDailyPrice(unit, date, price);
+                priceRows.setAll(productionPricing.getAllDailyPrices());
+                priceField.clear();
+            } catch (NumberFormatException ex) {
+                showErrorDialog("Invalid price", "Please enter a valid number.");
+            }
+        });
+
+        Button removeBtn = createActionButton("Remove selected", DANGER_COLOR, () -> {
+            ProductionPricing.DailyPriceEntry selected = table.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                showWarningDialog("No selection", "Select a price row to remove.");
+                return;
+            }
+            productionPricing.removeDailyPrice(selected.unit(), selected.date());
+            priceRows.setAll(productionPricing.getAllDailyPrices());
+        });
+
+        GridPane addGrid = new GridPane();
+        addGrid.setHgap(10);
+        addGrid.setVgap(10);
+        addGrid.add(new Label("Unit:"), 0, 0);
+        addGrid.add(unitBox, 1, 0);
+        addGrid.add(new Label("Date:"), 0, 1);
+        addGrid.add(datePicker, 1, 1);
+        addGrid.add(new Label("Price (DA):"), 0, 2);
+        addGrid.add(priceField, 1, 2);
+
+        HBox addActions = new HBox(10, addBtn, removeBtn);
+        Label hint = new Label("Each production entry uses the price defined for its date. If a day has no price, the nearest earlier price is used.");
+        hint.setWrapText(true);
+        hint.setTextFill(Color.web("#6c757d"));
+        hint.setFont(Font.font(11));
+
+        content.getChildren().addAll(table, addGrid, addActions, hint);
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        Optional<ButtonType> result = dialog.showAndWait();
+        if (result.isPresent() && result.get() == ButtonType.OK) {
+            saveAllData();
+            showInfoDialog("Prices saved", "Daily unit prices saved.");
+            showDashboard();
+        } else {
+            productionPricing.load();
+        }
+    }
+
+    private String formatUnitLabel(String unit) {
+        return switch (unit) {
+            case "L" -> "Milk (L)";
+            case "eggs" -> "Eggs";
+            case "kg" -> "Harvest (kg)";
+            default -> unit;
+        };
+    }
+
+    private Zone findZoneByCode(String zoneCode) {
+        for (CropZone zone : cropZones) {
+            if (zone.getCode().equals(zoneCode)) {
+                return zone;
+            }
+        }
+        for (LivestockZone zone : livestockZones) {
+            if (zone.getCode().equals(zoneCode)) {
+                return zone;
+            }
+        }
+        for (AquacultureZone zone : aquacultureZones) {
+            if (zone.getCode().equals(zoneCode)) {
+                return zone;
+            }
+        }
+        return null;
+    }
+
+    private boolean canOperateSensor(Sensor sensor) {
+        if (sensor.getStatus() != SensorStatus.ACTIVE) {
+            return false;
+        }
+        Zone zone = findZoneByCode(sensor.getZoneCode());
+        return zone == null || zone.getStatus() == ZoneStatus.ACTIVE;
     }
 
     private Button createActionButton(String text, String color, Runnable action) {
@@ -673,6 +1529,14 @@ public class Main extends Application {
     }
 
     private void showZones(String type) {
+        if ("crop".equals(type)) {
+            setActiveNavigation("crop");
+        } else if ("livestock".equals(type)) {
+            setActiveNavigation("livestock");
+        } else {
+            setActiveNavigation("aquaculture");
+        }
+
         VBox container = new VBox(15);
 
         if (type.equals("crop")) {
@@ -689,7 +1553,7 @@ public class Main extends Application {
             container.getChildren().add(createAquacultureZoneTable());
         }
 
-        contentArea.getChildren().setAll(container);
+        showInContentArea(container);
     }
 
     private VBox createCropZoneTable() {
@@ -779,8 +1643,7 @@ public class Main extends Application {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("Manage Crops - " + zone.getName());
         dialog.setResizable(true);
-        dialog.setWidth(800);
-        dialog.setHeight(600);
+        dialog.getDialogPane().setPrefSize(800, 600);
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(20));
@@ -819,12 +1682,22 @@ public class Main extends Application {
                 data.getValue().getOptimalPHMin() + " - " + data.getValue().getOptimalPHMax()));
         phCol.setPrefWidth(100);
 
+        TableColumn<Crop, String> productionCol = new TableColumn<>("Harvest (kg)");
+        productionCol.setCellValueFactory(data -> new SimpleStringProperty(
+                String.format("%.2f", data.getValue().getProduction())));
+        productionCol.setPrefWidth(90);
+
         TableColumn<Crop, Void> actionsCol = new TableColumn<>("Actions");
-        actionsCol.setPrefWidth(100);
+        actionsCol.setPrefWidth(180);
         actionsCol.setCellFactory(col -> new TableCell<Crop, Void>() {
             private final Button removeBtn = new Button("Remove");
+            private final Button prodBtn = new Button("Production");
+            private final HBox pane = new HBox(5, prodBtn, removeBtn);
+
             {
                 removeBtn.setStyle("-fx-background-color: " + DANGER_COLOR + "; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 3;");
+                prodBtn.setStyle("-fx-background-color: " + PRIMARY_COLOR + "; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 3;");
+
                 removeBtn.setOnAction(e -> {
                     Crop crop = getTableView().getItems().get(getIndex());
                     zone.getCrops().remove(crop);
@@ -832,15 +1705,21 @@ public class Main extends Application {
                     saveAllData();
                     showInfoDialog("Removed", "Crop '" + crop.getName() + "' removed");
                 });
+
+                prodBtn.setOnAction(e -> {
+                    Crop crop = getTableView().getItems().get(getIndex());
+                    showProductionRecordDialog(crop, crop.getName() + " @ " + zone.getCode(), () ->
+                            table.setItems(FXCollections.observableArrayList(zone.getCrops())));
+                });
             }
             @Override
             protected void updateItem(Void item, boolean empty) {
                 super.updateItem(item, empty);
-                setGraphic(empty ? null : removeBtn);
+                setGraphic(empty ? null : pane);
             }
         });
 
-        table.getColumns().addAll(nameCol, familyCol, stageCol, plantingCol, harvestCol, phCol, actionsCol);
+        table.getColumns().addAll(nameCol, familyCol, stageCol, plantingCol, harvestCol, phCol, productionCol, actionsCol);
 
         // Add Crop Form
         TitledPane addCropPane = new TitledPane();
@@ -957,8 +1836,7 @@ public class Main extends Application {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("Crop Zone Details - " + zone.getName());
         dialog.setResizable(true);
-        dialog.setWidth(650);
-        dialog.setHeight(550);
+        dialog.getDialogPane().setPrefSize(650, 550);
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(20));
@@ -1222,6 +2100,7 @@ public class Main extends Application {
     }
 
     private void showSensors() {
+        setActiveNavigation("sensors");
         VBox container = new VBox(15);
         setPageTitle("Sensors");
         container.getChildren().add(currentPageTitle);
@@ -1302,10 +2181,11 @@ public class Main extends Application {
         );
         container.getChildren().add(actions);
 
-        contentArea.getChildren().setAll(container);
+        showInContentArea(container);
     }
 
     private void showAlerts() {
+        setActiveNavigation("alerts");
         VBox container = new VBox(15);
         setPageTitle("Alerts Center");
         container.getChildren().add(currentPageTitle);
@@ -1323,7 +2203,7 @@ public class Main extends Application {
         tabs.getTabs().addAll(activeTab, historyTab);
         container.getChildren().add(tabs);
 
-        contentArea.getChildren().setAll(container);
+        showInContentArea(container);
     }
 
     private VBox createAlertTableView(ObservableList<model.entities.Alert> alerts, boolean showActions) {
@@ -1332,6 +2212,19 @@ public class Main extends Application {
         TableView<model.entities.Alert> table = new TableView<>();
         table.setItems(alerts);
         table.setPrefHeight(400);
+        table.setRowFactory(tv -> new TableRow<model.entities.Alert>() {
+            @Override
+            protected void updateItem(model.entities.Alert item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty) {
+                    setStyle("");
+                } else if (getIndex() % 2 == 0) {
+                    setStyle("-fx-background-color: #f8faf9;");
+                } else {
+                    setStyle("-fx-background-color: #eef4ef;");
+                }
+            }
+        });
 
         TableColumn<model.entities.Alert, String> idCol = new TableColumn<>("ID");
         idCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getId()));
@@ -1347,7 +2240,7 @@ public class Main extends Application {
 
         TableColumn<model.entities.Alert, String> thresholdCol = new TableColumn<>("Threshold");
         thresholdCol.setCellValueFactory(data -> new SimpleStringProperty(
-                String.format("[%.1f - %.1f]", data.getValue().getThresholdMin(), data.getValue().getThresholdMax())));
+                String.format("[%.1f - %.1f]", (double) data.getValue().getThresholdMin(), (double) data.getValue().getThresholdMax())));
         thresholdCol.setPrefWidth(150);
 
         TableColumn<model.entities.Alert, String> severityCol = new TableColumn<>("Severity");
@@ -1446,6 +2339,7 @@ public class Main extends Application {
     }
 
     private void showReports() {
+        setActiveNavigation("reports");
         VBox container = new VBox(15);
         setPageTitle("Reports");
         container.getChildren().add(currentPageTitle);
@@ -1455,21 +2349,33 @@ public class Main extends Application {
 
         VBox content = new VBox(20);
         content.setAlignment(Pos.CENTER);
-        content.getChildren().addAll(
-                new Label("Click the button below to generate and export a comprehensive report."),
-                new Label("The report will include 7 paginated sheets:"),
-                new Label("  1. Crop Zones - All crops with their details"),
-                new Label("  2. Livestock Zones - All animals and feeding programs"),
-                new Label("  3. Aquaculture Zones - Species and fish counts"),
-                new Label("  4. Sensors - All sensors with thresholds and last readings"),
-                new Label("  5. Alert History - All past alerts with status"),
-                new Label("  6. Active Alerts - Current alerts requiring attention"),
-                new Label("  7. Summary Statistics - Farm-wide metrics"),
-                exportBtn
-        );
+
+        // Use dark text for readability on light cards
+        String reportTextStyle = "-fx-text-fill: #495057; -fx-font-size: 13px;";
+        Label info1 = new Label("Click the button below to generate and export a comprehensive report.");
+        Label info2 = new Label("The report will include 7 paginated sheets:");
+        Label item1 = new Label("  1. Crop Zones - All crops with their details");
+        Label item2 = new Label("  2. Livestock Zones - All animals and feeding programs");
+        Label item3 = new Label("  3. Aquaculture Zones - Species and fish counts");
+        Label item4 = new Label("  4. Sensors - All sensors with thresholds and last readings");
+        Label item5 = new Label("  5. Alert History - All past alerts with status");
+        Label item6 = new Label("  6. Active Alerts - Current alerts requiring attention");
+        Label item7 = new Label("  7. Summary Statistics - Farm-wide metrics");
+
+        info1.setStyle(reportTextStyle);
+        info2.setStyle(reportTextStyle);
+        item1.setStyle(reportTextStyle);
+        item2.setStyle(reportTextStyle);
+        item3.setStyle(reportTextStyle);
+        item4.setStyle(reportTextStyle);
+        item5.setStyle(reportTextStyle);
+        item6.setStyle(reportTextStyle);
+        item7.setStyle(reportTextStyle);
+
+        content.getChildren().addAll(info1, info2, item1, item2, item3, item4, item5, item6, item7, exportBtn);
 
         container.getChildren().add(content);
-        contentArea.getChildren().setAll(container);
+        showInContentArea(container);
     }
 
     // ==================== DIALOG METHODS ====================
@@ -1510,7 +2416,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK && !nameField.getText().isEmpty() && familyBox.getValue() != null) {
-                CropZone zone = new CropZone(codeField.getText(), nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, null)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                CropZone zone = new CropZone(codeField.getText(), newName);
                 zone.setAllowedCropFamily(familyBox.getValue());  // REQUIRED
                 cropZones.add(zone);
                 zoneCounter++;
@@ -1553,7 +2465,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
-                zone.setName(nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, zone)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                zone.setName(newName);
                 if (statusBox.getValue() == ZoneStatus.SUSPENDED) {
                     zone.suspend();
                 } else {
@@ -1602,7 +2520,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK && !nameField.getText().isEmpty() && typeBox.getValue() != null) {
-                LivestockZone zone = new LivestockZone(codeField.getText(), nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, null)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                LivestockZone zone = new LivestockZone(codeField.getText(), newName);
                 zone.setAllowedAnimalType(typeBox.getValue());
                 livestockZones.add(zone);
                 zoneCounter++;
@@ -1644,7 +2568,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
-                zone.setName(nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, zone)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                zone.setName(newName);
                 if (statusBox.getValue() == ZoneStatus.SUSPENDED) {
                     zone.suspend();
                 } else {
@@ -1681,7 +2611,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK && !nameField.getText().isEmpty()) {
-                AquacultureZone zone = new AquacultureZone(codeField.getText(), nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, null)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                AquacultureZone zone = new AquacultureZone(codeField.getText(), newName);
                 aquacultureZones.add(zone);
                 zoneCounter++;
                 saveAllData();
@@ -1717,7 +2653,13 @@ public class Main extends Application {
 
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
-                zone.setName(nameField.getText());
+                String newName = nameField.getText().trim();
+                if (isZoneNameTaken(newName, zone)) {
+                    showErrorDialog("Duplicate Name", "A zone with that name already exists. Please choose a different name.");
+                    return;
+                }
+
+                zone.setName(newName);
                 try {
                     zone.setAnimalCount(Integer.parseInt(countField.getText()));
                 } catch (NumberFormatException e) {}
@@ -1797,8 +2739,7 @@ public class Main extends Application {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("Aquaculture Details - " + zone.getName());
         dialog.setResizable(true);
-        dialog.setWidth(500);
-        dialog.setHeight(400);
+        dialog.getDialogPane().setPrefSize(500, 400);
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(20));
@@ -1875,8 +2816,7 @@ public class Main extends Application {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("Manage Animals - " + zone.getName());
         dialog.setResizable(true);
-        dialog.setWidth(700);
-        dialog.setHeight(600);
+        dialog.getDialogPane().setPrefSize(700, 600);
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(20));
@@ -1906,16 +2846,29 @@ public class Main extends Application {
         healthCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getHealthStatus().toString()));
         healthCol.setPrefWidth(100);
 
+        TableColumn<Animal, String> productionCol = new TableColumn<>("Production");
+        productionCol.setCellValueFactory(data -> {
+            Animal animal = data.getValue();
+            if (animal instanceof Producing producing) {
+                String unit = producing.getProductionRecord().getUnit();
+                return new SimpleStringProperty(String.format("%.2f %s", producing.getProduction(), unit));
+            }
+            return new SimpleStringProperty("—");
+        });
+        productionCol.setPrefWidth(110);
+
         TableColumn<Animal, Void> actionsCol = new TableColumn<>("Actions");
-        actionsCol.setPrefWidth(150);
+        actionsCol.setPrefWidth(220);
         actionsCol.setCellFactory(col -> new TableCell<Animal, Void>() {
             private final Button removeBtn = new Button("Remove");
             private final Button eventsBtn = new Button("Events");
-            private final HBox pane = new HBox(5, eventsBtn, removeBtn);
+            private final Button prodBtn = new Button("Production");
+            private final HBox pane = new HBox(5, prodBtn, eventsBtn, removeBtn);
 
             {
                 removeBtn.setStyle("-fx-background-color: " + DANGER_COLOR + "; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 3;");
                 eventsBtn.setStyle("-fx-background-color: #2196f3; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 3;");
+                prodBtn.setStyle("-fx-background-color: " + PRIMARY_COLOR + "; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 3;");
 
                 removeBtn.setOnAction(e -> {
                     Animal animal = getTableView().getItems().get(getIndex());
@@ -1929,6 +2882,14 @@ public class Main extends Application {
                     Animal animal = getTableView().getItems().get(getIndex());
                     showAnimalHealthEvents(animal);
                 });
+
+                prodBtn.setOnAction(e -> {
+                    Animal animal = getTableView().getItems().get(getIndex());
+                    if (animal instanceof Producing producing) {
+                        showProductionRecordDialog(producing, animal.getId() + " @ " + zone.getCode(), () ->
+                                table.setItems(FXCollections.observableArrayList(zone.getAnimals())));
+                    }
+                });
             }
 
             @Override
@@ -1938,7 +2899,7 @@ public class Main extends Application {
             }
         });
 
-        table.getColumns().addAll(idCol, speciesCol, ageCol, weightCol, healthCol, actionsCol);
+        table.getColumns().addAll(idCol, speciesCol, ageCol, weightCol, healthCol, productionCol, actionsCol);
 
         // Add animal form
         GridPane form = new GridPane();
@@ -2011,8 +2972,7 @@ public class Main extends Application {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("Health Events - " + animal.getId());
         dialog.setResizable(true);
-        dialog.setWidth(500);
-        dialog.setHeight(400);
+        dialog.getDialogPane().setPrefSize(500, 400);
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(20));
@@ -2062,7 +3022,7 @@ public class Main extends Application {
         grid.add(createSensorCard("GPS Sensor", "#9c27b0", () -> showCreateSensorDialog("GPSSensor")), 1, 1);
 
         container.getChildren().add(grid);
-        contentArea.getChildren().setAll(container);
+        showInContentArea(container);
     }
 
     private VBox createSensorCard(String type, String color, Runnable action) {
@@ -2197,7 +3157,15 @@ public class Main extends Application {
                 try {
                     sensor.setThresholdMin(Double.parseDouble(minField.getText()));
                     sensor.setThresholdMax(Double.parseDouble(maxField.getText()));
-                    sensor.setStatus(statusBox.getValue());
+                    Zone zone = findZoneByCode(sensor.getZoneCode());
+                    if (zone != null && zone.getStatus() == ZoneStatus.SUSPENDED
+                            && statusBox.getValue() == SensorStatus.ACTIVE) {
+                        showWarningDialog("Zone suspended",
+                                "Sensors stay suspended while their zone is suspended.");
+                        sensor.setStatus(SensorStatus.SUSPENDED);
+                    } else {
+                        sensor.setStatus(statusBox.getValue());
+                    }
                     saveAllData();
                     showInfoDialog("Success", "Sensor updated!");
                     showSensors();
@@ -2212,8 +3180,7 @@ public class Main extends Application {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("Reading History - " + sensor.getCode());
         dialog.setResizable(true);
-        dialog.setWidth(800);
-        dialog.setHeight(500);
+        dialog.getDialogPane().setPrefSize(800, 500);
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(20));
@@ -2299,6 +3266,11 @@ public class Main extends Application {
             if (response == ButtonType.OK && sensorBox.getValue() != null) {
                 try {
                     Sensor sensor = sensorBox.getValue();
+                    if (!canOperateSensor(sensor)) {
+                        showWarningDialog("Sensor unavailable",
+                                "Cannot add readings or alerts for a suspended sensor or zone.");
+                        return;
+                    }
                     double value = Double.parseDouble(valueField.getText());
 
                     Reading reading = new Reading(sensor.getCode(), value, sensor.getUnit(), LocalDateTime.now());
@@ -2364,6 +3336,12 @@ public class Main extends Application {
         dialog.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
                 try {
+                    Sensor sensor = findSensorByCode(sensorField.getText().trim());
+                    if (sensor != null && !canOperateSensor(sensor)) {
+                        showWarningDialog("Sensor unavailable",
+                                "Cannot generate alerts for a suspended sensor or zone.");
+                        return;
+                    }
                     Alert alert = new Alert(
                             "ALT" + alertCounter++,
                             sensorField.getText(),
