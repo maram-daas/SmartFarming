@@ -678,22 +678,4 @@ Sensor Reading → Check Thresholds → Create Alert → Add to activeAlerts →
 | Position | GPS coordinate storage | None |
 
 ---
-
-## System Data Flow Diagram (Conceptual)
-
-```
-[Farm Manager] ←→ [UI Dashboard]
-                       ↓
-[Zone Operations] ←→ [CRUD Dialogs]
-                       ↓
-[Data Storage] (ObservableLists)
-                       ↓
-[Sensor Readings] → [Threshold Check] → [Alert Creation]
-                       ↓                       ↓
-[Reading History]              [Active Alerts] → [Manager Action] → [Alert History]
-                       ↓
-[Production Recording] → [Statistics] → [Reports]
-```
-
----
 This documentation covers ALL aspects of the system architecture, OOP principles, and component interactions.
